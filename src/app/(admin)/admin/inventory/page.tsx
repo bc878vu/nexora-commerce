@@ -1,343 +1,183 @@
 "use client";
 import { useEffect, useState } from "react";
-import { money } from "@/lib/catalog";
+
 type Variant = {
   id: string;
   sku: string;
+  productName: string;
+  attributes: { color?: string; spec?: string };
+  retailPrice: string;
   onHandStock: number;
   reservedStock: number;
-  retailPrice: string;
-  unitCost: string;
   reorderPoint: number;
-  product: { name: string };
+  warehouseBin: string;
 };
-type Order = {
-  id: string;
-  orderNumber: string;
-  status: string;
-  totalAmount: string;
-  shippingAddress: string;
-};
-type Ledger = {
-  id: string;
-  delta: number;
-  balanceAfter: number;
-  reason: string;
-  createdAt: string;
-  variant: { sku: string };
-};
-type Data = { variants: Variant[]; orders: Order[]; ledger: Ledger[] };
-export default function Admin() {
-  const [data, setData] = useState<Data | null>(null),
-    [message, setMessage] = useState(""),
-    [tab, setTab] = useState("Inventory"),
-    [busy, setBusy] = useState(false),
-    [loading, setLoading] = useState(true);
-  async function load() {
-    try {
-      const r = await fetch("/api/admin");
-      const d = await r.json();
-      if (!r.ok) {
-        setMessage(d.error);
-        setData(null);
-      } else setData(d);
-    } catch {
-      setMessage("Connection failed. Retry shortly.");
-    } finally {
-      setLoading(false);
-    }
+
+export default function AdminInventory() {
+  const [variants, setVariants] = useState<Variant[]>([]);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState("");
+  const [form, setForm] = useState({ sku: "", delta: "", reason: "PURCHASE_ORDER_RESTOCK", note: "" });
+  const [busy, setBusy] = useState(false);
+
+  function load() {
+    fetch("/api/admin")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.error) throw Error(d.error);
+        setVariants(d.variants);
+      })
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
   }
-  useEffect(() => {
-    load();
-  }, []);
-  async function send(url: string, body: unknown) {
+  useEffect(load, []);
+
+  async function adjust(e: React.FormEvent) {
+    e.preventDefault();
     setBusy(true);
-    setMessage("");
+    setError("");
+    setNotice("");
     try {
-      const r = await fetch(url, {
+      const r = await fetch("/api/inventory/adjust", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          sku: form.sku.trim(),
+          delta: Number(form.delta),
+          reason: form.reason,
+          note: form.note || undefined,
+        }),
       });
       const d = await r.json();
-      if (!r.ok) throw Error(d.error);
-      await load();
-      setMessage("Saved successfully.");
-    } catch (e) {
-      setMessage((e as Error).message);
+      if (!r.ok) throw Error(d.error || "Adjustment failed");
+      setNotice(`Stock updated. New balance: ${d.balanceAfter}.`);
+      setForm({ sku: "", delta: "", reason: "PURCHASE_ORDER_RESTOCK", note: "" });
+      load();
+    } catch (err) {
+      setError((err as Error).message);
     } finally {
       setBusy(false);
     }
   }
+
+  const shown = variants.filter(
+    (v) =>
+      !query ||
+      (v.sku + " " + v.productName).toLowerCase().includes(query.toLowerCase()),
+  );
+
+  if (loading) return <p>Loading inventory…</p>;
   return (
-    <main className="dashboard">
-      <div className="section-heading">
-        <div>
-          <p className="eyebrow">NEXORA / OPERATIONS</p>
-          <h1>Store overview.</h1>
-        </div>
-        {data && (
-          <button
-            onClick={async () => {
-              await fetch("/api/admin/session", { method: "DELETE" });
-              setData(null);
-              setMessage("Signed out.");
-            }}
-          >
-            Sign out
-          </button>
-        )}
-      </div>
-      {message && (
-        <p role="status" className="message">
-          {message}
+    <>
+      <h1>Inventory</h1>
+      {error && (
+        <p role="alert" className="message">
+          {error}
         </p>
       )}
-      {loading ? (
-        <p>Checking store session…</p>
-      ) : !data ? (
-        <form
-          className="login"
-          onSubmit={(e) => {
-            e.preventDefault();
-            send("/api/admin/session", {
-              password: new FormData(e.currentTarget).get("password"),
-            });
-          }}
-        >
-          <h2>Administrator sign in</h2>
-          <p>Use the administrator password configured on your server.</p>
+      {notice && <p className="message">{notice}</p>}
+
+      <h2>Stock adjustment</h2>
+      <form onSubmit={adjust} style={{ maxWidth: 640 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
           <label>
-            Password
+            SKU
             <input
-              name="password"
-              type="password"
+              value={form.sku}
+              onChange={(e) => setForm({ ...form, sku: e.target.value })}
               required
-              autoComplete="current-password"
+              placeholder="Paste SKU"
             />
           </label>
-          <button className="button dark" disabled={busy}>
-            Sign in securely
-          </button>
-        </form>
-      ) : (
-        <>
-          <div className="stats">
-            <div>
-              <small>ACTIVE SKUS</small>
-              <h2>{data.variants.length}</h2>
-            </div>
-            <div>
-              <small>ON-HAND UNITS</small>
-              <h2>{data.variants.reduce((s, v) => s + v.onHandStock, 0)}</h2>
-            </div>
-            <div>
-              <small>LOW STOCK</small>
-              <h2>
-                {
-                  data.variants.filter(
-                    (v) => v.onHandStock - v.reservedStock <= v.reorderPoint,
-                  ).length
-                }
-              </h2>
-            </div>
-            <div>
-              <small>STOCK AT COST</small>
-              <h2>
-                {money(
-                  data.variants.reduce(
-                    (s, v) => s + Number(v.unitCost) * v.onHandStock,
-                    0,
-                  ),
-                )}
-              </h2>
-            </div>
-          </div>
-          <div className="tabs">
-            {["Inventory", "Orders", "Stock ledger"].map((t) => (
-              <button
-                className={t === tab ? "active" : ""}
-                onClick={() => setTab(t)}
-                key={t}
-              >
-                {t}
-              </button>
+          <label>
+            Quantity (+/−)
+            <input
+              type="number"
+              value={form.delta}
+              onChange={(e) => setForm({ ...form, delta: e.target.value })}
+              required
+              placeholder="+50 or -5"
+            />
+          </label>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <label>
+            Reason
+            <select value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })}>
+              <option value="PURCHASE_ORDER_RESTOCK">Purchase order restock</option>
+              <option value="MANUAL_AUDIT">Manual audit correction</option>
+              <option value="DAMAGED_WRITE_OFF">Damaged write-off</option>
+            </select>
+          </label>
+          <label>
+            Note (optional)
+            <input
+              value={form.note}
+              onChange={(e) => setForm({ ...form, note: e.target.value })}
+              maxLength={300}
+            />
+          </label>
+        </div>
+        <button className="button dark" disabled={busy}>
+          {busy ? "Applying…" : "Apply adjustment"}
+        </button>
+        <p className="muted">
+          Every adjustment is written to the immutable stock ledger.
+        </p>
+      </form>
+
+      <h2>Variants ({shown.length})</h2>
+      <label className="search" style={{ maxWidth: 400 }}>
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search SKU or product…"
+          aria-label="Search variants"
+        />
+      </label>
+      <div className="table-wrap">
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <thead>
+            <tr>
+              <th style={{ textAlign: "left", padding: 10 }}>SKU</th>
+              <th style={{ textAlign: "left", padding: 10 }}>Product</th>
+              <th style={{ textAlign: "left", padding: 10 }}>Variant</th>
+              <th style={{ textAlign: "right", padding: 10 }}>On hand</th>
+              <th style={{ textAlign: "right", padding: 10 }}>Reserved</th>
+              <th style={{ textAlign: "right", padding: 10 }}>Available</th>
+              <th style={{ textAlign: "left", padding: 10 }}>Bin</th>
+              <th style={{ textAlign: "left", padding: 10 }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {shown.slice(0, 200).map((v) => (
+              <tr key={v.id} style={{ borderTop: "1px solid var(--line)" }}>
+                <td style={{ padding: 10 }}>{v.sku}</td>
+                <td style={{ padding: 10 }}>{v.productName}</td>
+                <td style={{ padding: 10 }}>
+                  {v.attributes.color} · {v.attributes.spec}
+                </td>
+                <td style={{ padding: 10, textAlign: "right" }}>{v.onHandStock}</td>
+                <td style={{ padding: 10, textAlign: "right" }}>{v.reservedStock}</td>
+                <td style={{ padding: 10, textAlign: "right" }}>
+                  <strong>{v.onHandStock - v.reservedStock}</strong>
+                </td>
+                <td style={{ padding: 10 }}>{v.warehouseBin}</td>
+                <td style={{ padding: 10 }}>
+                  <button onClick={() => setForm((f) => ({ ...f, sku: v.sku }))}>
+                    Adjust
+                  </button>
+                </td>
+              </tr>
             ))}
-          </div>
-          {tab === "Inventory" ? (
-            <>
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Product / SKU</th>
-                      <th>On hand</th>
-                      <th>Reserved</th>
-                      <th>Available</th>
-                      <th>Retail</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.variants.map((v) => (
-                      <tr key={v.id}>
-                        <td>
-                          <strong>{v.product.name}</strong>
-                          <br />
-                          <small>{v.sku}</small>
-                        </td>
-                        <td>{v.onHandStock}</td>
-                        <td>{v.reservedStock}</td>
-                        <td>{v.onHandStock - v.reservedStock}</td>
-                        <td>{money(Number(v.retailPrice))}</td>
-                        <td>
-                          <span className="badge">
-                            {v.onHandStock - v.reservedStock <= v.reorderPoint
-                              ? "Reorder"
-                              : "Healthy"}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <form
-                className="adjust-form"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const f = new FormData(e.currentTarget);
-                  send("/api/inventory/adjust", {
-                    sku: f.get("sku"),
-                    delta: Number(f.get("delta")),
-                    reason: f.get("reason"),
-                    note: f.get("note"),
-                  });
-                }}
-              >
-                <h2>Adjust stock</h2>
-                <label>
-                  SKU
-                  <select name="sku" required>
-                    {data.variants.map((v) => (
-                      <option key={v.id}>{v.sku}</option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Change (+ restock / − remove)
-                  <input
-                    name="delta"
-                    type="number"
-                    required
-                    step="1"
-                    min="-100000"
-                    max="100000"
-                  />
-                </label>
-                <label>
-                  Reason
-                  <select name="reason">
-                    <option value="PURCHASE_ORDER_RESTOCK">Restock</option>
-                    <option value="MANUAL_AUDIT">Manual audit</option>
-                    <option value="DAMAGED_WRITE_OFF">Damaged stock</option>
-                  </select>
-                </label>
-                <label>
-                  Audit note
-                  <input name="note" maxLength={300} />
-                </label>
-                <button
-                  className="button dark"
-                  disabled={busy || !data.variants.length}
-                >
-                  Save stock change
-                </button>
-              </form>
-            </>
-          ) : tab === "Orders" ? (
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Order / delivery</th>
-                    <th>Total</th>
-                    <th>Status</th>
-                    <th>Next action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.orders.map((o) => (
-                    <tr key={o.id}>
-                      <td>
-                        <strong className="order-id">{o.orderNumber}</strong>
-                        <details>
-                          <summary>Delivery details</summary>
-                          <p>{o.shippingAddress}</p>
-                        </details>
-                      </td>
-                      <td>{money(Number(o.totalAmount))}</td>
-                      <td>{o.status}</td>
-                      <td>
-                        {(o.status === "PROCESSING"
-                          ? ["SHIPPED", "CANCELLED"]
-                          : o.status === "SHIPPED"
-                            ? ["DELIVERED"]
-                            : []
-                        ).map((status) => (
-                          <button
-                            disabled={busy}
-                            key={status}
-                            onClick={() =>
-                              send("/api/admin/orders", { id: o.id, status })
-                            }
-                          >
-                            {status === "CANCELLED"
-                              ? "Cancel + restock"
-                              : status === "SHIPPED"
-                                ? "Mark shipped"
-                                : "Mark delivered"}
-                          </button>
-                        ))}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {!data.orders.length && <p className="empty">No orders yet.</p>}
-            </div>
-          ) : (
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>SKU</th>
-                    <th>Change</th>
-                    <th>Balance</th>
-                    <th>Reason</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.ledger.map((l) => (
-                    <tr key={l.id}>
-                      <td>{new Date(l.createdAt).toLocaleString()}</td>
-                      <td>{l.variant.sku}</td>
-                      <td>
-                        {l.delta > 0 ? "+" : ""}
-                        {l.delta}
-                      </td>
-                      <td>{l.balanceAfter}</td>
-                      <td>{l.reason}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <p className="muted">Latest 100 movements.</p>
-            </div>
-          )}
-        </>
+          </tbody>
+        </table>
+      </div>
+      {shown.length > 200 && (
+        <p className="muted">Showing first 200 — use search to narrow down.</p>
       )}
-    </main>
+    </>
   );
 }

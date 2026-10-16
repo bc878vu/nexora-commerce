@@ -44,6 +44,9 @@ export async function setSession(id: string = randomUUID(), role = "CUSTOMER") {
 export async function isAdmin() {
   return (await session())?.role === "ADMIN";
 }
+export async function clearSession() {
+  (await cookies()).delete("nexora_session");
+}
 export function sameOrigin(request: Request) {
   const origin = request.headers.get("origin");
   return !origin || origin === new URL(request.url).origin;

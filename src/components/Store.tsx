@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Search,
   ShoppingBag,
@@ -12,23 +12,29 @@ import {
   Truck,
   Package,
   SlidersHorizontal,
+  RotateCcw,
 } from "lucide-react";
-import { CatalogItem, money, shipping } from "@/lib/catalog";
+import { categories, money, shipping } from "@/lib/catalog";
+import type { ApiProduct, ApiVariant } from "@/app/api/catalog/route";
 import ProductArt from "./ProductArt";
-type Cart = Record<string, number>;
+import { useCart } from "@/lib/cart-store";
+
+type Selection = { product: ApiProduct; variant: ApiVariant };
+
 export default function Store() {
-  const [products, setProducts] = useState<CatalogItem[]>([]),
-    [demo, setDemo] = useState(false),
-    [error, setError] = useState(""),
-    [query, setQuery] = useState(""),
-    [category, setCategory] = useState("All essentials"),
-    [sort, setSort] = useState("featured"),
-    [cart, setCart] = useState<Cart>({}),
-    [ready, setReady] = useState(false),
-    [open, setOpen] = useState(false),
-    [detail, setDetail] = useState<CatalogItem | null>(null),
-    [busy, setBusy] = useState(false),
-    [notice, setNotice] = useState("");
+  const [products, setProducts] = useState<ApiProduct[]>([]);
+  const [demo, setDemo] = useState(false);
+  const [error, setError] = useState("");
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState<string>("All");
+  const [sort, setSort] = useState("featured");
+  const [open, setOpen] = useState(false);
+  const [detail, setDetail] = useState<ApiProduct | null>(null);
+  const [selColor, setSelColor] = useState("");
+  const [selSpec, setSelSpec] = useState("");
+  const [notice, setNotice] = useState("");
+  const { cart, setQty, remove, clear, count } = useCart();
+
   useEffect(() => {
     fetch("/api/catalog")
       .then((r) => r.json())
@@ -38,26 +44,72 @@ export default function Store() {
         setDemo(d.demo);
       })
       .catch((e) => setError(e.message));
-    try {
-      const saved = JSON.parse(localStorage.getItem("nexora-cart-v1") || "{}");
-      if (saved && typeof saved === "object" && !Array.isArray(saved))
-        setCart(
-          Object.fromEntries(
-            Object.entries(saved).filter(
-              ([, v]) =>
-                Number.isInteger(v) && Number(v) > 0 && Number(v) <= 20,
-            ),
-          ) as Cart,
-        );
-    } catch {}
-    setReady(true);
   }, []);
+
+  // Variant lookup: variant id -> { product, variant }
+  const variantIndex = useMemo(() => {
+    const m = new Map<string, Selection>();
+    for (const p of products)
+      for (const v of p.variants) m.set(v.id, { product: p, variant: v });
+    return m;
+  }, [products]);
+
+  const lines = useMemo(
+    () =>
+      Object.entries(cart)
+        .map(([id, qty]) => ({ sel: variantIndex.get(id), qty }))
+        .filter((l) => l.sel && l.qty > 0) as {
+        sel: Selection;
+        qty: number;
+      }[],
+    [cart, variantIndex],
+  );
+  const subtotal = lines.reduce(
+    (s, l) => s + l.sel.variant.price * l.qty,
+    0,
+  );
+  const bagCount = count();
+
+  function addVariant(sel: Selection, qty = 1) {
+    const cur = cart[sel.variant.id] || 0;
+    setQty(sel.variant.id, cur + qty, sel.variant.stock);
+    setNotice(`${sel.product.name} (${sel.variant.color}) added to your bag`);
+  }
+
+  // Detail modal variant selection
   useEffect(() => {
-    if (ready)
-      try {
-        localStorage.setItem("nexora-cart-v1", JSON.stringify(cart));
-      } catch {}
-  }, [cart, ready]);
+    if (detail && detail.variants.length) {
+      setSelColor(detail.variants[0].color);
+      const specs = [
+        ...new Set(
+          detail.variants
+            .filter((v) => v.color === detail.variants[0].color)
+            .map((v) => v.spec),
+        ),
+      ];
+      setSelSpec(specs[0] ?? "");
+    }
+  }, [detail]);
+
+  const detailColors = detail
+    ? [...new Set(detail.variants.map((v) => v.color))]
+    : [];
+  const detailSpecs = detail
+    ? [
+        ...new Set(
+          detail.variants
+            .filter((v) => v.color === selColor)
+            .map((v) => v.spec),
+        ),
+      ]
+    : [];
+  const detailVariant =
+    detail?.variants.find(
+      (v) => v.color === selColor && v.spec === selSpec,
+    ) ?? detail?.variants[0] ??
+    null;
+
+  // Focus trap + escape for dialogs (kept from original)
   useEffect(() => {
     if (!open && !detail) return;
     const previous = document.activeElement as HTMLElement | null;
@@ -92,123 +144,92 @@ export default function Store() {
       previous?.focus();
     };
   }, [open, detail]);
-  const lines = products.filter((p) => cart[p.id] > 0);
-  const subtotal = lines.reduce((s, p) => s + p.price * cart[p.id], 0);
-  const count = Object.values(cart).reduce((s, n) => s + n, 0);
-  function change(id: string, delta: number) {
-    const p = products.find((p) => p.id === id);
-    if (!p) return;
-    setCart((c) => {
-      const q = Math.max(0, Math.min(20, p.stock, (c[id] || 0) + delta));
-      const next = { ...c };
-      if (q) next[id] = q;
-      else delete next[id];
-      return next;
-    });
-  }
-  function add(p: CatalogItem) {
-    change(p.id, 1);
-    setNotice(p.name + " added to your bag");
-  }
-  async function place(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setBusy(true);
-    setNotice("");
-    const f = new FormData(e.currentTarget);
-    try {
-      const r = await fetch("/api/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: f.get("name"),
-          email: f.get("email"),
-          address: f.get("address"),
-          items: lines.map((p) => ({ id: p.id, quantity: cart[p.id] })),
-        }),
-      });
-      const d = await r.json();
-      if (!r.ok) throw Error(d.error);
-      setCart({});
-      window.location.assign("/dashboard");
-    } catch (e) {
-      setNotice((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
+
+  const minPrice = (p: ApiProduct) =>
+    Math.min(...p.variants.map((v) => v.price));
+  const totalStock = (p: ApiProduct) =>
+    p.variants.reduce((s, v) => s + v.stock, 0);
+
   let shown = products.filter(
     (p) =>
-      (category === "All essentials" || category === p.category) &&
-      (p.name + " " + p.category + " " + p.sku)
+      (category === "All" || category === p.category) &&
+      (p.name + " " + p.category + " " + p.description)
         .toLowerCase()
         .includes(query.toLowerCase()),
   );
-  if (sort === "low") shown = [...shown].sort((a, b) => a.price - b.price);
-  if (sort === "high") shown = [...shown].sort((a, b) => b.price - a.price);
+  if (sort === "low")
+    shown = [...shown].sort((a, b) => minPrice(a) - minPrice(b));
+  if (sort === "high")
+    shown = [...shown].sort((a, b) => minPrice(b) - minPrice(a));
+
+  const featured = products.find((p) => p.id === "hb-mira") ?? products[0];
+
   return (
     <>
       <main>
         <section className="hero">
           <div className="hero-copy">
             <p className="eyebrow">
-              <span /> THE EVERYDAY COLLECTION
+              <span /> THE VELORA VOGUE COLLECTION
             </p>
             <h1>
-              Less ordinary.
+              Carry confidence.
               <br />
-              <em>More you.</em>
+              <em>Step out in style.</em>
             </h1>
             <p>
-              Thoughtful tech. Beautiful essentials.
+              Handbags & footwear designed for her.
               <br />
-              Small upgrades that make a big difference.
+              Thoughtful pieces for every day in Pakistan.
             </p>
             <a className="button dark" href="#collection">
-              Find your everyday <ArrowUpRight size={19} />
+              Shop the collection <ArrowUpRight size={19} />
             </a>
             <div className="hero-note">
-              <span>01 — 06</span> CURATED WITH PURPOSE
+              <span>01 — 12</span> CURATED WITH CARE
             </div>
           </div>
           <div className="hero-visual">
-            <ProductArt icon="headphones" tone="#dce4d7" large />
-            <div className="hero-product">
-              <div>
-                <small>THE SOUND OF SOMETHING BETTER</small>
-                <h3>Studio Wireless</h3>
-                <p>Graphite / {money(18900)}</p>
+            <ProductArt icon="handbag" tone="#f3e9df" large />
+            {featured && (
+              <div className="hero-product">
+                <div>
+                  <small>BESTSELLER</small>
+                  <h3>{featured.name}</h3>
+                  <p>
+                    {featured.variants[0]?.color} / {money(minPrice(featured))}
+                  </p>
+                </div>
+                <button
+                  className="round"
+                  aria-label={"View " + featured.name}
+                  onClick={() => setDetail(featured)}
+                >
+                  <ArrowUpRight />
+                </button>
               </div>
-              <button
-                className="round"
-                aria-label="View Studio Wireless"
-                onClick={() =>
-                  setDetail(products.find((p) => p.id === "audio-01") ?? null)
-                }
-              >
-                <ArrowUpRight />
-              </button>
-            </div>
-            <span className="vertical-label">FORM MEETS FUNCTION</span>
+            )}
+            <span className="vertical-label">DESIGNED FOR HER</span>
           </div>
         </section>
         <div className="benefits">
           <span>
-            <Truck size={19} /> Free delivery over Rs 20,000
+            <Truck size={19} /> Free delivery over Rs 5,000
           </span>
           <span>
-            <Package size={19} /> Carefully selected essentials
+            <RotateCcw size={19} /> 7-day easy exchange
           </span>
           <span>
-            <Check size={19} /> Cash on delivery
+            <Check size={19} /> Cash on delivery nationwide
           </span>
         </div>
         <section id="collection" className="collection">
           <div className="section-heading">
             <div>
-              <p className="eyebrow">GOOD THINGS, WELL CHOSEN</p>
-              <h2>Your everyday, elevated.</h2>
+              <p className="eyebrow">HANDPICKED FOR YOU</p>
+              <h2>Bags & footwear, elevated.</h2>
             </div>
-            <p>A few favorites. Endless possibilities.</p>
+            <p>Twelve favorites. Endless possibilities.</p>
           </div>
           {demo && (
             <div className="preview-note">
@@ -218,13 +239,7 @@ export default function Store() {
           )}
           <div className="toolbar">
             <div className="tabs">
-              {[
-                "All essentials",
-                "Audio",
-                "Wearables",
-                "Workspace",
-                "Accessories",
-              ].map((c) => (
+              {categories.map((c) => (
                 <button
                   key={c}
                   aria-pressed={category === c}
@@ -242,7 +257,7 @@ export default function Store() {
                 setOpen(true);
               }}
             >
-              <ShoppingBag size={17} /> Bag <b>{count}</b>
+              <ShoppingBag size={17} /> Bag <b>{bagCount}</b>
             </button>
           </div>
           <div className="filters">
@@ -251,7 +266,7 @@ export default function Store() {
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Find your next favorite..."
+                placeholder="Search handbags, heels, wallets…"
                 aria-label="Search products"
               />
             </label>
@@ -271,51 +286,49 @@ export default function Store() {
           {error && <p role="alert">{error}</p>}
           {!products.length && !error && <p>Loading collection…</p>}
           <div className="grid">
-            {shown.map((p, i) => (
-              <article className="product" key={p.id}>
-                <button
-                  className="art-button"
-                  onClick={() => setDetail(p)}
-                  aria-label={"View " + p.name}
-                >
-                  <ProductArt icon={p.icon} tone={p.tone} />
-                  <span className="product-tag">
-                    {p.stock === 0
-                      ? "Sold out"
-                      : p.stock < 10
-                        ? "Almost gone"
-                        : i === 0
-                          ? "THE EVERYDAY FAVORITE"
-                          : p.category}
-                  </span>
-                  <span className="art-link">
-                    <ArrowUpRight size={18} />
-                  </span>
-                </button>
-                <div className="product-info">
-                  <div>
-                    <small>
-                      {p.category} / {p.color}
-                    </small>
-                    <h3>
-                      <button onClick={() => setDetail(p)}>{p.name}</button>
-                    </h3>
-                    <p>{money(p.price)}</p>
-                  </div>
+            {shown.map((p, i) => {
+              const stock = totalStock(p);
+              return (
+                <article className="product" key={p.id}>
                   <button
-                    className="round add"
-                    disabled={
-                      p.stock === 0 ||
-                      (cart[p.id] || 0) >= Math.min(20, p.stock)
-                    }
-                    aria-label={"Add " + p.name + " to bag"}
-                    onClick={() => add(p)}
+                    className="art-button"
+                    onClick={() => setDetail(p)}
+                    aria-label={"View " + p.name}
                   >
-                    <Plus size={19} />
+                    <ProductArt icon={p.icon} tone={p.tone} />
+                    <span className="product-tag">
+                      {stock === 0
+                        ? "Sold out"
+                        : stock < 20
+                          ? "Almost gone"
+                          : i === 0
+                            ? "BESTSELLER"
+                            : p.category}
+                    </span>
+                    <span className="art-link">
+                      <ArrowUpRight size={18} />
+                    </span>
                   </button>
-                </div>
-              </article>
-            ))}
+                  <div className="product-info">
+                    <div>
+                      <small>{p.category}</small>
+                      <h3>
+                        <button onClick={() => setDetail(p)}>{p.name}</button>
+                      </h3>
+                      <p>{money(minPrice(p))}</p>
+                    </div>
+                    <button
+                      className="round add"
+                      disabled={stock === 0}
+                      aria-label={"View " + p.name}
+                      onClick={() => setDetail(p)}
+                    >
+                      <Plus size={19} />
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
           </div>
           {products.length > 0 && !shown.length && (
             <div className="empty">
@@ -326,13 +339,13 @@ export default function Store() {
         <section className="story">
           <p className="eyebrow">THE NEXORA WAY</p>
           <h2>
-            Good design belongs
+            Beautiful things,
             <br />
-            in your everyday.
+            made for every day.
           </h2>
           <p>
-            We bring together useful, considered essentials for the way you
-            listen, work and unwind.
+            We curate handbags and footwear for the way she lives, works and
+            celebrates — delivered across Pakistan with cash on delivery.
           </p>
           <a href="#collection">
             Explore the collection <ArrowRight size={18} />
@@ -347,7 +360,7 @@ export default function Store() {
           </button>
         </div>
       )}
-      {detail && (
+      {detail && detailVariant && (
         <div className="overlay" onClick={() => setDetail(null)}>
           <section
             className="detail-modal"
@@ -369,22 +382,71 @@ export default function Store() {
               <p className="eyebrow">{detail.category}</p>
               <h2>{detail.name}</h2>
               <p>{detail.description}</p>
-              <h3>{money(detail.price)}</h3>
+              <h3>{money(detailVariant.price)}</h3>
+              <div className="filters" style={{ margin: "12px 0" }}>
+                <label>
+                  Colour
+                  <select
+                    value={selColor}
+                    onChange={(e) => {
+                      setSelColor(e.target.value);
+                      const specs = [
+                        ...new Set(
+                          detail.variants
+                            .filter((v) => v.color === e.target.value)
+                            .map((v) => v.spec),
+                        ),
+                      ];
+                      setSelSpec(specs[0] ?? "");
+                    }}
+                    aria-label="Choose colour"
+                  >
+                    {detailColors.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {detailSpecs.length > 1 && (
+                  <label>
+                    {detail.category === "Footwear" ? "Size" : "Option"}
+                    <select
+                      value={selSpec}
+                      onChange={(e) => setSelSpec(e.target.value)}
+                      aria-label="Choose size"
+                    >
+                      {detailSpecs.map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </div>
               <p>
-                {detail.color} · {detail.stock} available
+                {detailVariant.stock > 0
+                  ? `${detailVariant.stock} available`
+                  : "Sold out"}
               </p>
-              <small>SKU: {detail.sku}</small>
-              <button
-                className="button dark"
-                disabled={!detail.stock}
-                onClick={() => {
-                  add(detail);
-                  setDetail(null);
-                  setOpen(true);
-                }}
-              >
-                Add to bag <Plus size={18} />
-              </button>
+              <small>SKU: {detailVariant.sku}</small>
+              <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+                <button
+                  className="button dark"
+                  disabled={!detailVariant.stock}
+                  onClick={() => {
+                    addVariant({ product: detail, variant: detailVariant });
+                    setDetail(null);
+                    setOpen(true);
+                  }}
+                >
+                  Add to bag <Plus size={18} />
+                </button>
+                <a className="button" href={`/products/${detail.slug}`}>
+                  Full details <ArrowUpRight size={16} />
+                </a>
+              </div>
             </div>
           </section>
         </div>
@@ -406,47 +468,51 @@ export default function Store() {
             >
               <X />
             </button>
-            <p className="eyebrow">YOUR EVERYDAY EDIT</p>
-            <h2>Shopping bag ({count})</h2>
+            <p className="eyebrow">YOUR SELECTION</p>
+            <h2>Shopping bag ({bagCount})</h2>
             {!lines.length ? (
               <div className="empty">
                 <ShoppingBag />
-                <p>Your bag is waiting for something good.</p>
+                <p>Your bag is waiting for something beautiful.</p>
                 <button className="button dark" onClick={() => setOpen(false)}>
                   Explore collection
                 </button>
               </div>
             ) : (
               <>
-                {lines.map((p) => (
-                  <div className="cart-line" key={p.id}>
-                    <ProductArt icon={p.icon} tone={p.tone} />
+                {lines.map(({ sel, qty }) => (
+                  <div className="cart-line" key={sel.variant.id}>
+                    <ProductArt icon={sel.product.icon} tone={sel.product.tone} />
                     <div>
-                      <strong>{p.name}</strong>
-                      <p>{money(p.price)}</p>
+                      <strong>{sel.product.name}</strong>
+                      <p>
+                        {sel.variant.color}
+                        {sel.variant.spec !== "One Size"
+                          ? ` · Size ${sel.variant.spec}`
+                          : ""}
+                      </p>
+                      <p>{money(sel.variant.price)}</p>
                       <div className="quantity">
                         <button
-                          aria-label={"Decrease " + p.name}
-                          onClick={() => change(p.id, -1)}
+                          aria-label={"Decrease " + sel.product.name}
+                          onClick={() =>
+                            setQty(sel.variant.id, qty - 1, sel.variant.stock)
+                          }
                         >
                           <Minus size={14} />
                         </button>
-                        <span>{cart[p.id]}</span>
+                        <span>{qty}</span>
                         <button
-                          aria-label={"Increase " + p.name}
-                          onClick={() => change(p.id, 1)}
+                          aria-label={"Increase " + sel.product.name}
+                          onClick={() =>
+                            setQty(sel.variant.id, qty + 1, sel.variant.stock)
+                          }
                         >
                           <Plus size={14} />
                         </button>
                         <button
-                          aria-label={"Remove " + p.name}
-                          onClick={() =>
-                            setCart((c) => {
-                              const n = { ...c };
-                              delete n[p.id];
-                              return n;
-                            })
-                          }
+                          aria-label={"Remove " + sel.product.name}
+                          onClick={() => remove(sel.variant.id)}
                         >
                           <X size={14} />
                         </button>
@@ -468,50 +534,30 @@ export default function Store() {
                     Total <span>{money(subtotal + shipping(subtotal))}</span>
                   </h3>
                 </div>
-                <form onSubmit={place}>
-                  <h3>Delivery details</h3>
-                  <label>
-                    Full name
-                    <input
-                      name="name"
-                      required
-                      minLength={2}
-                      maxLength={100}
-                      autoComplete="name"
-                    />
-                  </label>
-                  <label>
-                    Email
-                    <input
-                      name="email"
-                      type="email"
-                      required
-                      autoComplete="email"
-                    />
-                  </label>
-                  <label>
-                    Complete address
-                    <textarea
-                      name="address"
-                      required
-                      minLength={10}
-                      maxLength={500}
-                      autoComplete="street-address"
-                    />
-                  </label>
-                  <p className="muted">
-                    Cash on delivery · Order history is saved to this browser’s
-                    secure session for 7 days.
-                  </p>
-                  <button className="button dark full" disabled={busy || demo}>
-                    {busy
-                      ? "Placing order…"
-                      : demo
-                        ? "Preview — checkout unavailable"
-                        : "Place order · " +
-                          money(subtotal + shipping(subtotal))}
-                  </button>
-                </form>
+                <button
+                  className="button dark full"
+                  disabled={demo}
+                  onClick={() => {
+                    setOpen(false);
+                    window.location.assign("/checkout");
+                  }}
+                >
+                  {demo
+                    ? "Preview — checkout unavailable"
+                    : "Proceed to checkout"}
+                </button>
+                <p className="muted">
+                  Cash on delivery · 7-day easy exchange · Secure checkout
+                </p>
+                <button
+                  className="button full"
+                  onClick={() => {
+                    clear();
+                    setNotice("Bag cleared");
+                  }}
+                >
+                  Clear bag
+                </button>
               </>
             )}
             {notice && (

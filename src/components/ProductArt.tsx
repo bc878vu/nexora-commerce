@@ -1,18 +1,8 @@
-import {
-  Headphones,
-  Speaker,
-  Watch,
-  Keyboard,
-  LampDesk,
-  BatteryCharging,
-} from "lucide-react";
+import { ShoppingBag, Footprints, Wallet } from "lucide-react";
 const icons = {
-  headphones: Headphones,
-  speaker: Speaker,
-  watch: Watch,
-  keyboard: Keyboard,
-  lamp: LampDesk,
-  battery: BatteryCharging,
+  handbag: ShoppingBag,
+  footprints: Footprints,
+  wallet: Wallet,
 };
 export default function ProductArt({
   icon,
@@ -23,7 +13,7 @@ export default function ProductArt({
   tone: string;
   large?: boolean;
 }) {
-  const Icon = icons[icon as keyof typeof icons] ?? Headphones;
+  const Icon = icons[icon as keyof typeof icons] ?? ShoppingBag;
   return (
     <div
       className={"product-art " + (large ? "large" : "")}

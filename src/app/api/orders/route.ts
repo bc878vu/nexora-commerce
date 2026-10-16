@@ -103,7 +103,11 @@ export async function POST(req: Request) {
           shippingAddress: JSON.stringify({
             name: body.name,
             email: body.email,
-            address: body.address,
+            phone: body.phone,
+            street: body.street,
+            city: body.city,
+            postalCode: body.postalCode,
+            paymentMethod: body.paymentMethod,
           }),
           items: { create: items },
         },

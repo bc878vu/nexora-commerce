@@ -1,81 +1,120 @@
 # Nexora Commerce
 
-A responsive Next.js / TypeScript storefront with a PostgreSQL inventory and order backend. Renamed and rebuilt from the uploaded Nexus Commerce starter.
+A full, real e-commerce store for **Velora Vogue** — women's handbags &
+footwear, priced in Pakistani Rupees. Next.js 16 (App Router) + TypeScript +
+Prisma (PostgreSQL) + Zustand cart + HMAC-signed cookie sessions. Cash on
+delivery and manual bank transfer (no card gateways operate in Pakistan, so
+none are integrated — by design, not a gap).
 
-## What works
+## What it includes (A to Z)
 
-- Responsive catalog, category filters, search, price sorting and product detail dialogs.
-- Browser-persisted cart, quantity limits and cash-on-delivery checkout.
-- Server-priced orders, atomic stock deduction, ledger entries and cancellation restocking.
-- Signed, HttpOnly customer sessions and browser-scoped order history.
-- Admin password sign-in, inventory overview, stock adjustment, orders and movement ledger.
-- Validated input, protected admin endpoints, compare-and-update concurrency checks, safe server errors.
-- Collision-resistant SKU generation, idempotent sample catalog seed, CI and unit tests.
+- **Storefront** — home with hero + featured products, shop page with
+  search / filter / sort, product detail pages with colour & size variant
+  (SKU) selectors, persistent cart (Zustand + localStorage), checkout with
+  address form + COD / bank-transfer choice, order confirmation page.
+- **User panel** — dashboard overview, full order history with a
+  Processing → Shipped → Delivered tracking timeline, address book CRUD,
+  profile + password change.
+- **Admin panel** (`/admin`) — KPI dashboard (revenue, orders by status,
+  customers, stock valuation, low-stock alerts), order management with
+  status transitions (cancelling releases stock back into inventory),
+  product CRUD with automatic SKU-matrix generation, stock adjustments with
+  an **immutable stock ledger**, and a user list (password hashes never
+  exposed).
+- **Security** — bcrypt password hashing (12 rounds), zod validation on
+  every input, login rate-limiting (5 attempts / 10 min per IP+email),
+  HMAC-signed httpOnly cookies (`Secure` + `SameSite=Lax` in production),
+  same-origin (CSRF) checks on all mutations, no secrets client-side,
+  security headers in `next.config.ts`.
 
-## Start locally
+## Product photos
 
-Requires Node.js 22+ and PostgreSQL for checkout/admin data.
+Product tiles currently render as clean icon art
+(`src/components/ProductArt.tsx` — Lucide icons, no hotlinked images). To
+go live with real photography, drop real photos into
+`public/products/<slug>.jpg` and point `ProductArt` at them — the layout
+already reserves the space.
 
-```sh
-npm ci
-cp .env.example .env
-# Fill DATABASE_URL, SESSION_SECRET (32+ random characters), ADMIN_PASSWORD (16+ random characters).
-npm run db:push
+No testimonials or reviews are fabricated anywhere on the site.
+
+## Getting started
+
+```bash
+npm install
+cp .env.example .env   # fill in DATABASE_URL + SESSION_SECRET
+```
+
+### Database (Supabase)
+
+1. Create a project at supabase.com.
+2. **Supabase dashboard → SQL editor → New query**, paste the contents of
+   `supabase-migration.sql` and run it. The script is idempotent — safe to
+   re-run. Verify with the check query at the bottom of the file.
+3. **Project settings → Database → Connection string → URI** (direct,
+   port 5432) → paste into `DATABASE_URL` in `.env`.
+
+> If you prefer Prisma migrations instead: `npm run db:push` or
+> `npm run db:migrate` (both need `DATABASE_URL`).
+
+### Seed the catalogue
+
+```bash
+# Optional: create the first admin (one time only)
+export ADMIN_EMAIL="you@example.com" ADMIN_PASSWORD="a-strong-password"
+
 npm run db:seed
-npm run dev
 ```
 
-Open http://localhost:3000. Admin: `/admin/inventory`. Orders: `/dashboard`.
+Seeds 12 Velora Vogue products (6 handbags, 4 footwear styles, 2 wallets),
+~111 variants with generated SKUs, opening stock and `INITIAL_SEED` ledger
+entries. Re-running is a no-op once products exist.
 
-Without DATABASE_URL the catalog uses clearly marked sample data; cart, filters and product details work, but checkout is disabled. No fake orders or fake stock adjustments are reported as successful. There is no live database bundled in this project.
+### Run
 
-## Production deployment
-
-1. Push this directory's contents to a new GitHub repository (do not upload node_modules, .next or .env).
-2. Import the repository into a Next.js-capable host such as Vercel. Use Node 22+, `npm ci`, and `npm run build`.
-3. Configure DATABASE*URL, SESSION_SECRET and ADMIN_PASSWORD as server-side secrets. Never prefix them with NEXT_PUBLIC*.
-4. Initialize an empty PostgreSQL database with `npm run db:push`; run `npm run db:seed` only if the sample products are wanted. For an existing production database, review and version Prisma migrations rather than using db:push blindly.
-5. Enable HTTPS, rate limiting on `/api/admin/session` and `/api/orders`, backups, and monitoring at the hosting layer before opening to shoppers.
-6. Replace sample products, prices and illustrations with your actual catalog. Review business shipping, privacy and return policies before launch.
-
-## Deliberate limits
-
-- Cash on delivery only; no online payment gateway or card data processing.
-- Customer history is session-based (7 days), not email/password account authentication. Save order references; another browser cannot retrieve old orders. Email is recorded on the order for fulfillment, not used as proof of identity.
-- One shared administrator credential; no multi-staff accounts, password reset or MFA yet. Deploy behind additional access controls as appropriate.
-- Fulfillment is manually updated by the admin; there is no courier integration or automated email.
-- Product editing is currently via Prisma/database; the UI manages stock and orders. Inventory/order/ledger tables show the latest 100 orders/movements.
-- Addresses are entered at checkout, not a separate address book. Return requests are not implemented.
-- Product art is illustrative vector artwork, not photographs of real merchandise. Font loading has system-font fallbacks.
-
-## Validation
-
-```sh
-npm test
-npm run typecheck
-npm run build
+```bash
+npm run dev        # http://localhost:3000
+npm run typecheck  # tsc --noEmit
+npm test           # node:test suite
 ```
 
-Unit tests cover SKU collisions, invalid stock adjustments, malformed checkout payloads, session tampering and delivery thresholds. Live database transaction and browser tests require the corresponding environments; do not treat unit tests as production acceptance.
+## Environment variables
 
-## Important paths
+| Variable        | Required | Notes                                              |
+| --------------- | -------- | -------------------------------------------------- |
+| `DATABASE_URL`  | yes      | Supabase Postgres URI (direct, port 5432)          |
+| `SESSION_SECRET`| yes      | ≥ 32 random chars (`openssl rand -hex 32`)         |
+| `ADMIN_EMAIL`   | no       | seed-only: first admin account                     |
+| `ADMIN_PASSWORD`| no       | seed-only: admin password                          |
 
-- `src/components/Store.tsx`: catalog, bag and checkout
-- `src/app/api/orders/route.ts`: session-owned orders and transactional checkout
-- `src/app/api/inventory/adjust/route.ts`: authorized stock adjustments
-- `src/app/api/admin/orders/route.ts`: fulfillment transitions and cancellation restock
-- `src/lib/auth.ts`: signed server sessions
-- `prisma/schema.prisma`: retained relational inventory/order model
-- `prisma/seed.ts`: repeatable starter catalog without stock-resetting existing records
+Without `DATABASE_URL` the storefront runs in **demo mode** (the built-in
+12-product catalogue) so the UI is always viewable; checkout, accounts and
+admin require the database.
 
-## GitHub upload
+## Payments
 
-```sh
-git init -b main
-git add .
-git commit -m "Build Nexora Commerce storefront and inventory platform"
-git remote add origin https://github.com/YOUR_USERNAME/nexora-commerce.git
-git push -u origin main
+Cash on delivery and manual bank transfer only. At checkout with
+**Bank transfer**, the confirmation page shows the store's account details
+and asks the customer to share the transfer receipt on WhatsApp. No card
+gateways, no test-mode fakes.
+
+## Project layout
+
 ```
-
-Create the empty repository before running the last two commands.
+prisma/            schema.prisma, seed.ts
+supabase-migration.sql   idempotent DDL for the Supabase SQL editor
+src/
+  app/
+    api/           catalog, auth/*, orders, addresses/*, profile,
+                   admin/*, inventory/*
+    (auth)/        login, signup pages
+    (user)/dashboard   user panel
+    (admin)/admin      admin panel
+    checkout/      checkout + order confirmation
+    products/[slug]    product detail
+  lib/             auth (HMAC sessions), password (bcrypt), validation (zod),
+                   ratelimit, catalog (pricing/demo data), sku-generator,
+                   cart-store (zustand), db
+  components/      Store.tsx (shop UI), ProductArt.tsx
+tests/core.test.ts
+.github/workflows/ci.yml   install → prisma generate → typecheck → test
+```
