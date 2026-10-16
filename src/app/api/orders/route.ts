@@ -3,7 +3,12 @@ import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { session, setSession, sameOrigin } from "@/lib/auth";
 import { checkout } from "@/lib/validation";
-import { shipping } from "@/lib/catalog";
+import {
+  shipping,
+  availablePaymentMethods,
+  DEFAULT_PAYMENT_METHODS,
+} from "@/lib/catalog";
+import { getStoreSettings } from "@/lib/store-settings";
 export async function GET() {
   const s = await session();
   if (!s || s.role !== "CUSTOMER") return NextResponse.json({ orders: [] });
@@ -47,6 +52,35 @@ export async function POST(req: Request) {
   const body = parsed.data;
   const s = await session();
   const userId = s?.role === "CUSTOMER" ? s.id : randomUUID();
+  // Server-trusted shipping: zone rate from store settings for the country.
+  const settings = await getStoreSettings();
+  const zones = settings?.shippingZones;
+  // The chosen method must actually be offered for this country right now.
+  const offered = availablePaymentMethods(
+    body.country,
+    settings?.paymentMethods ?? DEFAULT_PAYMENT_METHODS,
+    {
+      stripeConfigured: !!settings && settings.stripeSecretKey.trim().length > 0,
+      paypalConfigured:
+        !!settings &&
+        settings.paypalClientId.trim().length > 0 &&
+        settings.paypalSecret.trim().length > 0,
+    },
+  );
+  if (!offered.some((m) => m.method === body.paymentMethod))
+    return NextResponse.json(
+      { error: "That payment method isn't available for your country." },
+      { status: 400 },
+    );
+  // Manual (non-COD, non-card) methods require the customer's reference ID.
+  if (
+    ["BANK_TRANSFER", "JAZZCASH", "EASYPAYSA"].includes(body.paymentMethod) &&
+    !body.paymentRef.trim()
+  )
+    return NextResponse.json(
+      { error: "Please enter your transaction / reference ID." },
+      { status: 400 },
+    );
   try {
     const order = await prisma.$transaction(async (tx) => {
       await tx.user.upsert({
@@ -99,7 +133,7 @@ export async function POST(req: Request) {
         data: {
           orderNumber: "NX-" + randomUUID().toUpperCase(),
           userId,
-          totalAmount: total + shipping(total),
+          totalAmount: total + shipping(total, body.country, zones),
           shippingAddress: JSON.stringify({
             name: body.name,
             email: body.email,
@@ -107,8 +141,12 @@ export async function POST(req: Request) {
             street: body.street,
             city: body.city,
             postalCode: body.postalCode,
+            country: body.country,
             paymentMethod: body.paymentMethod,
+            paymentRef: body.paymentRef || undefined,
           }),
+          paymentMethod: body.paymentMethod,
+          paymentRef: body.paymentRef || null,
           items: { create: items },
         },
       });

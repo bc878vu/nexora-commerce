@@ -9,6 +9,9 @@ type Order = {
   totalAmount: string;
   createdAt: string;
   shippingAddress: string;
+  paymentMethod: string;
+  paymentRef: string | null;
+  paymentVerified: boolean;
   user: { name: string; email: string };
   items: { sku: string; quantity: number; unitPrice: string }[];
 };
@@ -18,6 +21,15 @@ const NEXT: Record<string, string[]> = {
   SHIPPED: ["DELIVERED", "CANCELLED"],
   DELIVERED: [],
   CANCELLED: [],
+};
+
+const METHOD_LABEL: Record<string, string> = {
+  COD: "Cash on delivery",
+  BANK_TRANSFER: "Bank transfer",
+  JAZZCASH: "JazzCash",
+  EASYPAYSA: "Easypaisa",
+  STRIPE: "Card (Stripe)",
+  PAYPAL: "PayPal",
 };
 
 export default function AdminOrders() {
@@ -61,6 +73,32 @@ export default function AdminOrders() {
     }
   }
 
+  async function toggleVerified(o: Order) {
+    const action = o.paymentVerified ? "unmark" : "mark";
+    if (!confirm(`${action === "mark" ? "Mark" : "Unmark"} payment as verified for ${o.orderNumber}?`))
+      return;
+    setBusy(o.id);
+    setError("");
+    setNotice("");
+    try {
+      const r = await fetch(`/api/admin/orders/${o.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentVerified: !o.paymentVerified }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw Error(d.error || "Update failed");
+      setNotice(
+        `Payment ${d.paymentVerified ? "verified" : "unmarked"} for ${o.orderNumber}.`,
+      );
+      load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
   if (loading) return <p>Loading orders…</p>;
   return (
     <>
@@ -91,7 +129,26 @@ export default function AdminOrders() {
             </p>
             <p className="muted">
               {addr.name}, {addr.phone} · {addr.street}, {addr.city} ·{" "}
-              {addr.paymentMethod === "BANK_TRANSFER" ? "Bank transfer" : "COD"}
+              {METHOD_LABEL[o.paymentMethod] ?? o.paymentMethod}
+              {o.paymentRef ? ` · Ref: ${o.paymentRef}` : ""}
+            </p>
+            <p className="muted">
+              Payment:{" "}
+              {o.paymentVerified ? (
+                <span className="badge">Verified</span>
+              ) : (
+                <span className="badge">Unverified</span>
+              )}{" "}
+              {o.paymentMethod !== "COD" && (
+                <button
+                  className="button"
+                  disabled={busy === o.id}
+                  onClick={() => toggleVerified(o)}
+                  style={{ marginLeft: 8 }}
+                >
+                  {o.paymentVerified ? "Unmark verified" : "Mark payment verified"}
+                </button>
+              )}
             </p>
             <p className="muted">
               {o.items.map((i) => `${i.sku} × ${i.quantity}`).join(" · ")}

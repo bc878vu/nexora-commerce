@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Package, MapPin, User, LogOut } from "lucide-react";
+import { Package, MapPin, User, LogOut, Heart } from "lucide-react";
 import { money } from "@/lib/catalog";
 
 type Order = {
@@ -93,6 +93,12 @@ export default function Dashboard() {
         <p style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <Link className="button" href="/dashboard/orders">
             <Package size={15} /> All orders
+          </Link>
+          <Link className="button" href="/dashboard/claims">
+            My claims
+          </Link>
+          <Link className="button" href="/dashboard/wishlist">
+            <Heart size={15} /> Wishlist
           </Link>
           <Link className="button" href="/dashboard/addresses">
             <MapPin size={15} /> Addresses

@@ -1,5 +1,6 @@
 /**
  * Nexora Commerce seed — Velora Vogue catalogue (women's handbags & footwear).
+ * Worldwide market (USA / UK / Europe focus). All prices in USD.
  *
  * Usage (requires DATABASE_URL):
  *   npm run db:seed
@@ -10,6 +11,10 @@
 import { PrismaClient, StockChangeReason } from "@prisma/client";
 import { hashPassword } from "../src/lib/password";
 import { buildSkuCode } from "../src/lib/sku-generator";
+import {
+  DEFAULT_PAYMENT_METHODS,
+  DEFAULT_SHIPPING_ZONES,
+} from "../src/lib/catalog";
 
 const prisma = new PrismaClient();
 
@@ -25,6 +30,8 @@ type SeedVariant = {
 type SeedProduct = {
   name: string;
   category: string;
+  /** Subcategory slug, e.g. "totes". */
+  subcategory: string;
   description: string;
   basePrice: number;
   variants: SeedVariant[];
@@ -80,42 +87,113 @@ const SHOE_COLORS = ["Black", "Nude", "Tan", "White"];
 const WALLET_COLORS = ["Black", "Tan", "Blush"];
 
 const PRODUCTS: SeedProduct[] = [
-  { name: "Aurelia Tote", category: "Handbags", description: HANDBAG_DESC.aurelia, basePrice: 4850,
-    variants: variants(BAG_COLORS, ["One Size"], 4850, 2600, 30) },
-  { name: "Mira Crossbody", category: "Handbags", description: HANDBAG_DESC.mira, basePrice: 3290,
-    variants: variants(BAG_COLORS, ["One Size"], 3290, 1750, 40) },
-  { name: "Sofia Shoulder Bag", category: "Handbags", description: HANDBAG_DESC.sofia, basePrice: 5450,
-    variants: variants(BAG_COLORS, ["One Size"], 5450, 2950, 25) },
-  { name: "Elena Clutch", category: "Handbags", description: HANDBAG_DESC.elena, basePrice: 2990,
-    variants: variants(["Black", "Gold", "Silver"], ["One Size"], 2990, 1600, 35) },
-  { name: "Noor Satchel", category: "Handbags", description: HANDBAG_DESC.noor, basePrice: 4250,
-    variants: variants(BAG_COLORS, ["One Size"], 4250, 2300, 30) },
-  { name: "Dua Mini Backpack", category: "Handbags", description: HANDBAG_DESC.dua, basePrice: 3950,
-    variants: variants(["Black", "Tan", "Beige"], ["One Size"], 3950, 2100, 30) },
-  { name: "Zara Block Heels", category: "Footwear", description: SHOES_DESC.zara, basePrice: 3850,
-    variants: variants(SHOE_COLORS, ["36", "37", "38", "39", "40", "41"], 3850, 2000, 12) },
-  { name: "Amara Flats", category: "Footwear", description: SHOES_DESC.amara, basePrice: 2450,
-    variants: variants(SHOE_COLORS, ["36", "37", "38", "39", "40", "41"], 2450, 1250, 15) },
-  { name: "Lena Wedges", category: "Footwear", description: SHOES_DESC.lena, basePrice: 3150,
-    variants: variants(["Black", "Tan", "Nude"], ["36", "37", "38", "39", "40", "41"], 3150, 1650, 12) },
-  { name: "Haya Sandals", category: "Footwear", description: SHOES_DESC.haya, basePrice: 2150,
-    variants: variants(["Black", "White", "Tan"], ["36", "37", "38", "39", "40", "41"], 2150, 1100, 18) },
-  { name: "Ivy Long Wallet", category: "Wallets", description: WALLET_DESC.ivy, basePrice: 1850,
-    variants: variants(WALLET_COLORS, ["One Size"], 1850, 950, 45) },
-  { name: "Pearl Card Holder", category: "Wallets", description: WALLET_DESC.pearl, basePrice: 950,
-    variants: variants(WALLET_COLORS, ["One Size"], 950, 480, 60) },
+  { name: "Aurelia Tote", category: "Handbags", subcategory: "totes", description: HANDBAG_DESC.aurelia, basePrice: 79,
+    variants: variants(BAG_COLORS, ["One Size"], 79, 42, 30) },
+  { name: "Mira Crossbody", category: "Handbags", subcategory: "shoulder-bags", description: HANDBAG_DESC.mira, basePrice: 49,
+    variants: variants(BAG_COLORS, ["One Size"], 49, 26, 40) },
+  { name: "Sofia Shoulder Bag", category: "Handbags", subcategory: "shoulder-bags", description: HANDBAG_DESC.sofia, basePrice: 89,
+    variants: variants(BAG_COLORS, ["One Size"], 89, 48, 25) },
+  { name: "Elena Clutch", category: "Handbags", subcategory: "clutches", description: HANDBAG_DESC.elena, basePrice: 45,
+    variants: variants(["Black", "Gold", "Silver"], ["One Size"], 45, 24, 35) },
+  { name: "Noor Satchel", category: "Handbags", subcategory: "shoulder-bags", description: HANDBAG_DESC.noor, basePrice: 65,
+    variants: variants(BAG_COLORS, ["One Size"], 65, 35, 30) },
+  { name: "Dua Mini Backpack", category: "Handbags", subcategory: "totes", description: HANDBAG_DESC.dua, basePrice: 59,
+    variants: variants(["Black", "Tan", "Beige"], ["One Size"], 59, 32, 30) },
+  { name: "Zara Block Heels", category: "Footwear", subcategory: "heels", description: SHOES_DESC.zara, basePrice: 69,
+    variants: variants(SHOE_COLORS, ["36", "37", "38", "39", "40", "41"], 69, 37, 12) },
+  { name: "Amara Flats", category: "Footwear", subcategory: "flats", description: SHOES_DESC.amara, basePrice: 39,
+    variants: variants(SHOE_COLORS, ["36", "37", "38", "39", "40", "41"], 39, 21, 15) },
+  { name: "Lena Wedges", category: "Footwear", subcategory: "sandals", description: SHOES_DESC.lena, basePrice: 55,
+    variants: variants(["Black", "Tan", "Nude"], ["36", "37", "38", "39", "40", "41"], 55, 30, 12) },
+  { name: "Haya Sandals", category: "Footwear", subcategory: "sandals", description: SHOES_DESC.haya, basePrice: 35,
+    variants: variants(["Black", "White", "Tan"], ["36", "37", "38", "39", "40", "41"], 35, 19, 18) },
+  { name: "Ivy Long Wallet", category: "Wallets", subcategory: "long-wallets", description: WALLET_DESC.ivy, basePrice: 29,
+    variants: variants(WALLET_COLORS, ["One Size"], 29, 16, 45) },
+  { name: "Pearl Card Holder", category: "Wallets", subcategory: "mini-wallets", description: WALLET_DESC.pearl, basePrice: 19,
+    variants: variants(WALLET_COLORS, ["One Size"], 19, 10, 60) },
 ];
 
 function slugify(name: string) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
+/** Category hierarchy seeded once (idempotent via slug upsert). */
+const CATEGORIES: { name: string; slug: string; children: { name: string; slug: string }[] }[] = [
+  {
+    name: "Handbags",
+    slug: "handbags",
+    children: [
+      { name: "Totes", slug: "totes" },
+      { name: "Shoulder Bags", slug: "shoulder-bags" },
+      { name: "Clutches", slug: "clutches" },
+    ],
+  },
+  {
+    name: "Footwear",
+    slug: "footwear",
+    children: [
+      { name: "Heels", slug: "heels" },
+      { name: "Flats", slug: "flats" },
+      { name: "Sandals", slug: "sandals" },
+    ],
+  },
+  {
+    name: "Wallets",
+    slug: "wallets",
+    children: [
+      { name: "Long Wallets", slug: "long-wallets" },
+      { name: "Mini Wallets", slug: "mini-wallets" },
+    ],
+  },
+];
+
+async function seedCategories() {
+  const slugToId = new Map<string, string>();
+  for (const c of CATEGORIES) {
+    const parent = await prisma.category.upsert({
+      where: { slug: c.slug },
+      update: { name: c.name, parentId: null },
+      create: { name: c.name, slug: c.slug },
+    });
+    slugToId.set(c.slug, parent.id);
+    for (const ch of c.children) {
+      const child = await prisma.category.upsert({
+        where: { slug: ch.slug },
+        update: { name: ch.name, parentId: parent.id },
+        create: { name: ch.name, slug: ch.slug, parentId: parent.id },
+      });
+      slugToId.set(ch.slug, child.id);
+    }
+  }
+  console.log(`Seeded categories: ${slugToId.size}`);
+  return slugToId;
+}
+
+async function seedSettings() {
+  await prisma.storeSettings.upsert({
+    where: { id: "default" },
+    update: {},
+    create: {
+      id: "default",
+      paymentMethods: DEFAULT_PAYMENT_METHODS,
+      shippingZones: DEFAULT_SHIPPING_ZONES,
+    },
+  });
+  console.log("Store settings ensured (edit payment details in Admin → Settings).");
+}
+
 async function main() {
+  await seedCategories();
+  await seedSettings();
+
   const count = await prisma.product.count();
   if (count > 0) {
     console.log(`Seed skipped: ${count} products already exist (idempotent).`);
     return;
   }
+
+  const slugToId = new Map<string, string>();
+  for (const c of await prisma.category.findMany()) slugToId.set(c.slug, c.id);
 
   for (const p of PRODUCTS) {
     const prefix = p.category.slice(0, 3).toUpperCase().replace(/[^A-Z]/g, "X");
@@ -125,6 +203,7 @@ async function main() {
         name: p.name,
         slug: slugify(p.name),
         category: p.category,
+        categoryId: slugToId.get(p.subcategory) ?? null,
         description: p.description,
         basePrice: p.basePrice,
       },

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { catalog, presentationFor } from "@/lib/catalog";
+import { catalog, presentationFor, categoryPath } from "@/lib/catalog";
 
 export type ApiVariant = {
   id: string;
@@ -16,6 +16,9 @@ export type ApiProduct = {
   name: string;
   slug: string;
   category: string;
+  categoryId: string | null;
+  categoryPath: string[];
+  status: "ACTIVE" | "INACTIVE" | "DRAFT";
   description: string;
   basePrice: number;
   icon: string;
@@ -30,6 +33,9 @@ function demoCatalog(): ApiProduct[] {
     name: p.name,
     slug: p.id,
     category: p.category,
+    categoryId: null,
+    categoryPath: [p.category],
+    status: "ACTIVE" as const,
     description: p.description,
     basePrice: p.price,
     icon: p.icon,
@@ -51,10 +57,13 @@ export async function GET() {
   if (!process.env.DATABASE_URL)
     return NextResponse.json({ products: demoCatalog(), demo: true });
   try {
-    const products = await prisma.product.findMany({
-      include: { variants: { orderBy: { sku: "asc" } } },
-      orderBy: { name: "asc" },
-    });
+    const [products, categories] = await Promise.all([
+      prisma.product.findMany({
+        include: { variants: { orderBy: { sku: "asc" } } },
+        orderBy: { name: "asc" },
+      }),
+      prisma.category.findMany(),
+    ]);
     return NextResponse.json({
       demo: false,
       products: products.map((p) => {
@@ -64,6 +73,12 @@ export async function GET() {
           name: p.name,
           slug: p.slug,
           category: p.category,
+          categoryId: p.categoryId,
+          categoryPath: categoryPath(
+            categories.map((c) => ({ id: c.id, name: c.name, parentId: c.parentId })),
+            p.categoryId,
+          ).map((c) => c.name),
+          status: p.status,
           description: p.description,
           basePrice: Number(p.basePrice),
           icon: pres.icon,

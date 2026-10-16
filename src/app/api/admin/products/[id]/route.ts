@@ -15,7 +15,13 @@ export async function PATCH(
   const parsed = productInput.partial().safeParse(await req.json().catch(() => null));
   if (!parsed.success || Object.keys(parsed.data).length === 0)
     return NextResponse.json({ error: "Nothing to update." }, { status: 400 });
+  const data = parsed.data;
   try {
+    if (data.categoryId) {
+      const cat = await prisma.category.findUnique({ where: { id: data.categoryId } });
+      if (!cat)
+        return NextResponse.json({ error: "Category not found." }, { status: 400 });
+    }
     const product = await prisma.product.update({
       where: { id },
       data: parsed.data,

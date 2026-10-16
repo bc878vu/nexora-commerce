@@ -13,13 +13,91 @@ import {
   Package,
   SlidersHorizontal,
   RotateCcw,
+  Heart,
+  ShieldCheck,
+  Globe,
+  Instagram,
 } from "lucide-react";
-import { categories, money, shipping } from "@/lib/catalog";
+import {
+  categories,
+  money,
+  shipping,
+  stockBadge,
+  buildCategoryTree,
+  type CategoryNode,
+} from "@/lib/catalog";
 import type { ApiProduct, ApiVariant } from "@/app/api/catalog/route";
 import ProductArt from "./ProductArt";
 import { useCart } from "@/lib/cart-store";
 
 type Selection = { product: ApiProduct; variant: ApiVariant };
+
+function CategoryTree({
+  nodes,
+  selectedId,
+  expanded,
+  onSelect,
+  onToggle,
+  depth = 0,
+}: {
+  nodes: CategoryNode[];
+  selectedId: string | null;
+  expanded: Set<string>;
+  onSelect: (id: string) => void;
+  onToggle: (id: string) => void;
+  depth?: number;
+}) {
+  return (
+    <ul
+      style={{
+        listStyle: "none",
+        margin: 0,
+        padding: depth ? "4px 0 4px 18px" : 0,
+        display: "flex",
+        flexDirection: "column",
+        gap: 4,
+      }}
+    >
+      {nodes.map((n) => (
+        <li key={n.id}>
+          <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            {n.children.length > 0 ? (
+              <button
+                type="button"
+                aria-label={expanded.has(n.id) ? `Collapse ${n.name}` : `Expand ${n.name}`}
+                aria-expanded={expanded.has(n.id)}
+                onClick={() => onToggle(n.id)}
+                style={{ minWidth: 24 }}
+              >
+                {expanded.has(n.id) ? "−" : "+"}
+              </button>
+            ) : (
+              <span style={{ minWidth: 24 }} aria-hidden="true" />
+            )}
+            <button
+              type="button"
+              aria-pressed={selectedId === n.id}
+              className={selectedId === n.id ? "active" : ""}
+              onClick={() => onSelect(n.id)}
+            >
+              {n.name}
+            </button>
+          </span>
+          {expanded.has(n.id) && n.children.length > 0 && (
+            <CategoryTree
+              nodes={n.children}
+              selectedId={selectedId}
+              expanded={expanded}
+              onSelect={onSelect}
+              onToggle={onToggle}
+              depth={depth + 1}
+            />
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 export default function Store() {
   const [products, setProducts] = useState<ApiProduct[]>([]);
@@ -27,6 +105,9 @@ export default function Store() {
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string>("All");
+  const [catTree, setCatTree] = useState<CategoryNode[]>([]);
+  const [selectedCatId, setSelectedCatId] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [sort, setSort] = useState("featured");
   const [open, setOpen] = useState(false);
   const [detail, setDetail] = useState<ApiProduct | null>(null);
@@ -34,6 +115,55 @@ export default function Store() {
   const [selSpec, setSelSpec] = useState("");
   const [notice, setNotice] = useState("");
   const { cart, setQty, remove, clear, count } = useCart();
+  const [wishlist, setWishlist] = useState<Set<string>>(new Set());
+  const [wishReady, setWishReady] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/wishlist")
+      .then((r) => r.json())
+      .then((d) =>
+        setWishlist(new Set((d.items ?? []).map((i: { productId: string }) => i.productId))),
+      )
+      .catch(() => {})
+      .finally(() => setWishReady(true));
+  }, []);
+
+  async function toggleWish(productId: string) {
+    if (!wishReady) return;
+    const adding = !wishlist.has(productId);
+    // Optimistic update
+    setWishlist((prev) => {
+      const next = new Set(prev);
+      if (adding) next.add(productId);
+      else next.delete(productId);
+      return next;
+    });
+    try {
+      const r = await fetch("/api/wishlist", {
+        method: adding ? "POST" : "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ productId }),
+      });
+      if (r.status === 401) {
+        // Not signed in — revert and nudge to login
+        setWishlist((prev) => {
+          const next = new Set(prev);
+          if (adding) next.delete(productId);
+          else next.add(productId);
+          return next;
+        });
+        setNotice("Sign in to save items to your wishlist");
+      }
+    } catch {
+      /* revert on network failure */
+      setWishlist((prev) => {
+        const next = new Set(prev);
+        if (adding) next.delete(productId);
+        else next.add(productId);
+        return next;
+      });
+    }
+  }
 
   useEffect(() => {
     fetch("/api/catalog")
@@ -44,6 +174,12 @@ export default function Store() {
         setDemo(d.demo);
       })
       .catch((e) => setError(e.message));
+    fetch("/api/categories")
+      .then((r) => r.json())
+      .then((d) => {
+        if (Array.isArray(d.categories)) setCatTree(d.categories);
+      })
+      .catch(() => {});
   }, []);
 
   // Variant lookup: variant id -> { product, variant }
@@ -150,19 +286,74 @@ export default function Store() {
   const totalStock = (p: ApiProduct) =>
     p.variants.reduce((s, v) => s + v.stock, 0);
 
-  let shown = products.filter(
-    (p) =>
-      (category === "All" || category === p.category) &&
-      (p.name + " " + p.category + " " + p.description)
-        .toLowerCase()
-        .includes(query.toLowerCase()),
-  );
+  // All category ids inside the selected subtree (selected + descendants).
+  const selectedIds = useMemo(() => {
+    if (!selectedCatId) return null;
+    const ids = new Set<string>();
+    const collect = (x: CategoryNode) => {
+      ids.add(x.id);
+      x.children.forEach(collect);
+    };
+    const find = (nodes: CategoryNode[]): boolean => {
+      for (const n of nodes) {
+        if (n.id === selectedCatId) {
+          collect(n);
+          return true;
+        }
+        if (find(n.children)) return true;
+      }
+      return false;
+    };
+    find(catTree);
+    return ids;
+  }, [selectedCatId, catTree]);
+
+  const selectedName = useMemo(() => {
+    if (!selectedCatId) return null;
+    const find = (nodes: CategoryNode[]): string | null => {
+      for (const n of nodes) {
+        if (n.id === selectedCatId) return n.name;
+        const r = find(n.children);
+        if (r) return r;
+      }
+      return null;
+    };
+    return find(catTree);
+  }, [selectedCatId, catTree]);
+
+  let shown = products.filter((p) => {
+    if (p.status !== "ACTIVE") return false;
+    if (selectedIds) {
+      // Tree selection wins: match by categoryId subtree, falling back to
+      // the legacy category label for products not yet linked.
+      const linked =
+        p.categoryId != null
+          ? selectedIds.has(p.categoryId)
+          : selectedName != null &&
+            p.category.toLowerCase() === selectedName.toLowerCase();
+      if (!linked) return false;
+    } else if (category !== "All" && category !== p.category) {
+      return false;
+    }
+    return (p.name + " " + p.category + " " + p.description)
+      .toLowerCase()
+      .includes(query.toLowerCase());
+  });
   if (sort === "low")
     shown = [...shown].sort((a, b) => minPrice(a) - minPrice(b));
   if (sort === "high")
     shown = [...shown].sort((a, b) => minPrice(b) - minPrice(a));
 
   const featured = products.find((p) => p.id === "hb-mira") ?? products[0];
+
+  const featuredPieces = useMemo(
+    () =>
+      products
+        .filter((p) => p.status === "ACTIVE" && totalStock(p) > 0)
+        .slice(0, 4),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [products],
+  );
 
   return (
     <>
@@ -180,7 +371,7 @@ export default function Store() {
             <p>
               Handbags & footwear designed for her.
               <br />
-              Thoughtful pieces for every day in Pakistan.
+              Thoughtful pieces for every day, everywhere.
             </p>
             <a className="button dark" href="#collection">
               Shop the collection <ArrowUpRight size={19} />
@@ -214,13 +405,13 @@ export default function Store() {
         </section>
         <div className="benefits">
           <span>
-            <Truck size={19} /> Free delivery over Rs 5,000
+            <Truck size={19} /> Free delivery over $75
           </span>
           <span>
             <RotateCcw size={19} /> 7-day easy exchange
           </span>
           <span>
-            <Check size={19} /> Cash on delivery nationwide
+            <Check size={19} /> Secure worldwide checkout
           </span>
         </div>
         <section id="collection" className="collection">
@@ -239,16 +430,29 @@ export default function Store() {
           )}
           <div className="toolbar">
             <div className="tabs">
-              {categories.map((c) => (
+              {catTree.length > 0 ? (
                 <button
-                  key={c}
-                  aria-pressed={category === c}
-                  className={c === category ? "active" : ""}
-                  onClick={() => setCategory(c)}
+                  aria-pressed={selectedCatId === null && category === "All"}
+                  className={selectedCatId === null && category === "All" ? "active" : ""}
+                  onClick={() => {
+                    setSelectedCatId(null);
+                    setCategory("All");
+                  }}
                 >
-                  {c}
+                  All
                 </button>
-              ))}
+              ) : (
+                categories.map((c) => (
+                  <button
+                    key={c}
+                    aria-pressed={category === c}
+                    className={c === category ? "active" : ""}
+                    onClick={() => setCategory(c)}
+                  >
+                    {c}
+                  </button>
+                ))
+              )}
             </div>
             <button
               className="bag-button"
@@ -260,6 +464,27 @@ export default function Store() {
               <ShoppingBag size={17} /> Bag <b>{bagCount}</b>
             </button>
           </div>
+          {catTree.length > 0 && (
+            <nav aria-label="Categories" style={{ margin: "12px 0" }}>
+              <CategoryTree
+                nodes={catTree}
+                selectedId={selectedCatId}
+                expanded={expanded}
+                onSelect={(id) => {
+                  setSelectedCatId((cur) => (cur === id ? null : id));
+                  setCategory("All");
+                }}
+                onToggle={(id) =>
+                  setExpanded((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(id)) next.delete(id);
+                    else next.add(id);
+                    return next;
+                  })
+                }
+              />
+            </nav>
+          )}
           <div className="filters">
             <label className="search">
               <Search size={18} />
@@ -288,6 +513,7 @@ export default function Store() {
           <div className="grid">
             {shown.map((p, i) => {
               const stock = totalStock(p);
+              const badge = stockBadge(stock);
               return (
                 <article className="product" key={p.id}>
                   <button
@@ -297,13 +523,11 @@ export default function Store() {
                   >
                     <ProductArt icon={p.icon} tone={p.tone} />
                     <span className="product-tag">
-                      {stock === 0
-                        ? "Sold out"
-                        : stock < 20
-                          ? "Almost gone"
-                          : i === 0
-                            ? "BESTSELLER"
-                            : p.category}
+                      {badge === "In Stock"
+                        ? i === 0
+                          ? "BESTSELLER"
+                          : p.category
+                        : badge}
                     </span>
                     <span className="art-link">
                       <ArrowUpRight size={18} />
@@ -317,14 +541,31 @@ export default function Store() {
                       </h3>
                       <p>{money(minPrice(p))}</p>
                     </div>
-                    <button
-                      className="round add"
-                      disabled={stock === 0}
-                      aria-label={"View " + p.name}
-                      onClick={() => setDetail(p)}
-                    >
-                      <Plus size={19} />
-                    </button>
+                    <span style={{ display: "flex", gap: 8 }}>
+                      <button
+                        className="round"
+                        aria-label={
+                          wishlist.has(p.id)
+                            ? `Remove ${p.name} from wishlist`
+                            : `Save ${p.name} to wishlist`
+                        }
+                        aria-pressed={wishlist.has(p.id)}
+                        onClick={() => toggleWish(p.id)}
+                      >
+                        <Heart
+                          size={18}
+                          fill={wishlist.has(p.id) ? "currentColor" : "none"}
+                        />
+                      </button>
+                      <button
+                        className="round add"
+                        disabled={stock === 0}
+                        aria-label={"Quick view " + p.name}
+                        onClick={() => setDetail(p)}
+                      >
+                        <Plus size={19} />
+                      </button>
+                    </span>
                   </div>
                 </article>
               );
@@ -332,7 +573,18 @@ export default function Store() {
           </div>
           {products.length > 0 && !shown.length && (
             <div className="empty">
-              No products found. Try another search or category.
+              <Package size={28} aria-hidden="true" />
+              <p>No products found. Try another search or category.</p>
+              <button
+                className="button"
+                onClick={() => {
+                  setQuery("");
+                  setCategory("All");
+                  setSelectedCatId(null);
+                }}
+              >
+                Clear filters
+              </button>
             </div>
           )}
         </section>
@@ -345,10 +597,174 @@ export default function Store() {
           </h2>
           <p>
             We curate handbags and footwear for the way she lives, works and
-            celebrates — delivered across Pakistan with cash on delivery.
+            celebrates — shipped worldwide with secure checkout.
           </p>
           <a href="#collection">
             Explore the collection <ArrowRight size={18} />
+          </a>
+        </section>
+
+        {catTree.length > 0 && (
+          <section className="collection" aria-label="Shop by category">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">BROWSE</p>
+                <h2>Shop by category</h2>
+              </div>
+            </div>
+            <div className="grid">
+              {catTree.map((c) => (
+                <article className="product" key={c.id}>
+                  <button
+                    className="art-button"
+                    aria-label={`Shop ${c.name}`}
+                    onClick={() => {
+                      setSelectedCatId(c.id);
+                      setCategory("All");
+                      setExpanded(new Set([c.id]));
+                      document
+                        .getElementById("collection")
+                        ?.scrollIntoView({ behavior: "smooth" });
+                    }}
+                  >
+                    <ProductArt
+                      icon={
+                        c.name.toLowerCase().includes("foot")
+                          ? "footprints"
+                          : c.name.toLowerCase().includes("wallet")
+                            ? "wallet"
+                            : "handbag"
+                      }
+                      tone="#f3e9df"
+                    />
+                    <span className="product-tag">
+                      {c.children.length
+                        ? `${c.children.length} styles`
+                        : "Shop now"}
+                    </span>
+                  </button>
+                  <div className="product-info">
+                    <div>
+                      <h3>
+                        <button
+                          onClick={() => {
+                            setSelectedCatId(c.id);
+                            setCategory("All");
+                            document
+                              .getElementById("collection")
+                              ?.scrollIntoView({ behavior: "smooth" });
+                          }}
+                        >
+                          {c.name}
+                        </button>
+                      </h3>
+                      <p className="muted">
+                        {c.children.map((x) => x.name).join(" · ")}
+                      </p>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {featuredPieces.length > 0 && (
+          <section className="collection" aria-label="Featured pieces">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">HANDPICKED</p>
+                <h2>Featured pieces</h2>
+              </div>
+              <a href="#collection">View all →</a>
+            </div>
+            <div className="grid">
+              {featuredPieces.map((p) => (
+                <article className="product" key={p.id}>
+                  <button
+                    className="art-button"
+                    onClick={() => setDetail(p)}
+                    aria-label={"Quick view " + p.name}
+                  >
+                    <ProductArt icon={p.icon} tone={p.tone} />
+                    <span className="product-tag">Featured</span>
+                  </button>
+                  <div className="product-info">
+                    <div>
+                      <small>{p.category}</small>
+                      <h3>
+                        <button onClick={() => setDetail(p)}>{p.name}</button>
+                      </h3>
+                      <p>{money(minPrice(p))}</p>
+                    </div>
+                    <button
+                      className="round add"
+                      aria-label={"Quick view " + p.name}
+                      onClick={() => setDetail(p)}
+                    >
+                      <Plus size={19} />
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
+
+        <section className="story" aria-label="Why shop with us">
+          <p className="eyebrow">SHOP WITH CONFIDENCE</p>
+          <h2>Why Nexora?</h2>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+              gap: 16,
+              marginTop: 20,
+              textAlign: "left",
+            }}
+          >
+            <div>
+              <Globe size={22} aria-hidden="true" />
+              <h3>Worldwide shipping</h3>
+              <p className="muted">
+                Free delivery on orders over $75 — USA, UK, Europe and beyond.
+              </p>
+            </div>
+            <div>
+              <ShieldCheck size={22} aria-hidden="true" />
+              <h3>Secure checkout</h3>
+              <p className="muted">
+                Cards, PayPal, bank transfer and cash on delivery (Pakistan).
+              </p>
+            </div>
+            <div>
+              <RotateCcw size={22} aria-hidden="true" />
+              <h3>7-day easy exchange</h3>
+              <p className="muted">
+                Changed your mind? Swap colours or sizes within 7 days.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <section className="story" aria-label="Follow us on Instagram">
+          <p className="eyebrow">
+            <Instagram size={16} aria-hidden="true" /> INSTAGRAM
+          </p>
+          <h2>
+            Follow @shopvelora_vogue
+          </h2>
+          <p>
+            New arrivals, styling ideas and behind-the-scenes — see it first on
+            Instagram.
+          </p>
+          <a
+            className="button dark"
+            href="https://instagram.com/shopvelora_vogue"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Follow on Instagram <ArrowUpRight size={18} />
           </a>
         </section>
       </main>
@@ -547,7 +963,7 @@ export default function Store() {
                     : "Proceed to checkout"}
                 </button>
                 <p className="muted">
-                  Cash on delivery · 7-day easy exchange · Secure checkout
+                  Secure checkout · 7-day easy exchange · Worldwide delivery
                 </p>
                 <button
                   className="button full"

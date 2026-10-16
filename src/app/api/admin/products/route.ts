@@ -52,6 +52,15 @@ export async function POST(req: Request) {
     let n = 1;
     while (await prisma.product.findUnique({ where: { slug } })) slug = `${slugify(p.name)}-${++n}`;
 
+    // Validate the linked category when one is chosen.
+    let categoryId: string | null = null;
+    if (p.categoryId) {
+      const cat = await prisma.category.findUnique({ where: { id: p.categoryId } });
+      if (!cat)
+        return NextResponse.json({ error: "Category not found." }, { status: 400 });
+      categoryId = cat.id;
+    }
+
     const prefix = p.category.slice(0, 3).toUpperCase().replace(/[^A-Z]/g, "X");
     const code = slugify(p.name).slice(0, 8).toUpperCase().replace(/[^A-Z0-9]/g, "");
     const product = await prisma.$transaction(async (tx) => {
@@ -60,6 +69,8 @@ export async function POST(req: Request) {
           name: p.name,
           slug,
           category: p.category,
+          categoryId,
+          status: p.status ?? "ACTIVE",
           description: p.description,
           basePrice: p.basePrice,
         },

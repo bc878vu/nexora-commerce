@@ -1,26 +1,123 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { money, shipping } from "@/lib/catalog";
+import {
+  money,
+  shipping,
+  availablePaymentMethods,
+  comingSoonMethods,
+  DEFAULT_SHIPPING_ZONES,
+  DEFAULT_PAYMENT_METHODS,
+  type PaymentMethodConfig,
+  type ShippingZone,
+} from "@/lib/catalog";
+import type { PublicSettings } from "@/lib/store-settings";
 import ProductArt from "@/components/ProductArt";
 import { useCart } from "@/lib/cart-store";
 import type { ApiProduct } from "@/app/api/catalog/route";
 
 export const dynamic = "force-dynamic";
 
+const COUNTRIES = [
+  "United States",
+  "United Kingdom",
+  "Canada",
+  "Australia",
+  "Germany",
+  "France",
+  "Italy",
+  "Spain",
+  "Netherlands",
+  "Belgium",
+  "Austria",
+  "Ireland",
+  "Portugal",
+  "Sweden",
+  "Denmark",
+  "Finland",
+  "Norway",
+  "Poland",
+  "Greece",
+  "Switzerland",
+  "United Arab Emirates",
+  "Saudi Arabia",
+  "Pakistan",
+  "India",
+];
+
+const METHOD_LABEL: Record<string, { title: string; hint: string }> = {
+  COD: {
+    title: "Cash on delivery",
+    hint: "Pay in cash when your order arrives (Pakistan only).",
+  },
+  BANK_TRANSFER: {
+    title: "Bank transfer",
+    hint: "Transfer to our account, then enter your transaction ID below.",
+  },
+  JAZZCASH: {
+    title: "JazzCash",
+    hint: "Send to our JazzCash number, then enter your transaction ID below.",
+  },
+  EASYPAYSA: {
+    title: "Easypaisa",
+    hint: "Send to our Easypaisa number, then enter your transaction ID below.",
+  },
+  STRIPE: {
+    title: "Card payment",
+    hint: "Pay securely by card — we'll send you a payment link right after you order.",
+  },
+  PAYPAL: {
+    title: "PayPal",
+    hint: "Pay with PayPal — we'll send you a payment link right after you order.",
+  },
+};
+
+const MANUAL = ["BANK_TRANSFER", "JAZZCASH", "EASYPAYSA"];
+
 export default function CheckoutPage() {
   const { cart, clear } = useCart();
   const [products, setProducts] = useState<ApiProduct[]>([]);
+  const [settings, setSettings] = useState<PublicSettings | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [method, setMethod] = useState<"COD" | "BANK_TRANSFER">("COD");
+  const [country, setCountry] = useState("United States");
+  const [method, setMethod] = useState<string>("COD");
+  const [paymentRef, setPaymentRef] = useState("");
 
   useEffect(() => {
     fetch("/api/catalog")
       .then((r) => r.json())
       .then((d) => setProducts(d.products ?? []))
       .catch(() => setProducts([]));
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((d) => setSettings(d))
+      .catch(() => setSettings(null));
   }, []);
+
+  const methods: PaymentMethodConfig[] = settings?.paymentMethods ?? DEFAULT_PAYMENT_METHODS;
+  const zones: ShippingZone[] = settings?.shippingZones ?? DEFAULT_SHIPPING_ZONES;
+  const configured = {
+    stripeConfigured: settings?.stripeConfigured ?? false,
+    paypalConfigured: settings?.paypalConfigured ?? false,
+  };
+
+  const offered = useMemo(
+    () => availablePaymentMethods(country, methods, configured),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [country, JSON.stringify(methods), configured.stripeConfigured, configured.paypalConfigured],
+  );
+  const comingSoon = useMemo(
+    () => comingSoonMethods(methods, configured),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [JSON.stringify(methods), configured.stripeConfigured, configured.paypalConfigured],
+  );
+
+  // Keep the selected method valid when the country changes.
+  useEffect(() => {
+    if (!offered.some((m) => m.method === method) && offered.length)
+      setMethod(offered[0].method);
+  }, [offered, method]);
 
   const index = useMemo(() => {
     const m = new Map<string, { p: ApiProduct; v: ApiProduct["variants"][number] }>();
@@ -36,7 +133,45 @@ export default function CheckoutPage() {
     qty: number;
   }[];
   const subtotal = lines.reduce((s, l) => s + l.item.v.price * l.qty, 0);
-  const total = subtotal + shipping(subtotal);
+  const delivery = shipping(subtotal, country, zones);
+  const total = subtotal + delivery;
+
+  const needsRef = MANUAL.includes(method);
+
+  function receivingDetails() {
+    if (!settings) return null;
+    if (method === "BANK_TRANSFER" && (settings.bankName || settings.bankAccount || settings.bankIban))
+      return (
+        <div className="order-card" style={{ marginTop: 10 }}>
+          <h4>Send your payment to</h4>
+          {settings.bankName && <p>Bank: <b>{settings.bankName}</b></p>}
+          {settings.bankAccount && <p>Account: <b>{settings.bankAccount}</b></p>}
+          {settings.bankIban && <p>IBAN: <b>{settings.bankIban}</b></p>}
+        </div>
+      );
+    if (method === "JAZZCASH" && settings.jazzcashNumber)
+      return (
+        <div className="order-card" style={{ marginTop: 10 }}>
+          <h4>Send your payment to</h4>
+          <p>JazzCash: <b>{settings.jazzcashNumber}</b></p>
+        </div>
+      );
+    if (method === "EASYPAYSA" && settings.easypaisaNumber)
+      return (
+        <div className="order-card" style={{ marginTop: 10 }}>
+          <h4>Send your payment to</h4>
+          <p>Easypaisa: <b>{settings.easypaisaNumber}</b></p>
+        </div>
+      );
+    if (MANUAL.includes(method))
+      return (
+        <p className="muted" style={{ marginTop: 10 }}>
+          We&apos;ll share the payment details with you right after you place
+          the order.
+        </p>
+      );
+    return null;
+  }
 
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -54,7 +189,9 @@ export default function CheckoutPage() {
           street: f.get("street"),
           city: f.get("city"),
           postalCode: f.get("postalCode") || "",
+          country,
           paymentMethod: method,
+          paymentRef: needsRef ? paymentRef : "",
           items: lines.map((l) => ({ id: l.item.v.id, quantity: l.qty })),
         }),
       });
@@ -107,7 +244,7 @@ export default function CheckoutPage() {
             Subtotal <b>{money(subtotal)}</b>
           </p>
           <p>
-            Delivery <b>{shipping(subtotal) ? money(shipping(subtotal)) : "Free"}</b>
+            Delivery <b>{delivery ? money(delivery) : "Free"}</b>
           </p>
           <h3>
             Total <span>{money(total)}</span>
@@ -126,13 +263,13 @@ export default function CheckoutPage() {
           <input name="email" type="email" required autoComplete="email" />
         </label>
         <label>
-          Mobile number
+          Phone number
           <input
             name="phone"
             required
-            pattern="03[0-9]{9}"
-            title="11-digit mobile starting with 03"
-            placeholder="03XXXXXXXXX"
+            minLength={7}
+            maxLength={20}
+            placeholder="+1 555 123 4567"
             autoComplete="tel"
           />
         </label>
@@ -157,43 +294,110 @@ export default function CheckoutPage() {
             <input name="postalCode" maxLength={20} autoComplete="postal-code" />
           </label>
         </div>
+        <label>
+          Country
+          <select
+            value={country}
+            onChange={(e) => setCountry(e.target.value)}
+            autoComplete="country-name"
+          >
+            {COUNTRIES.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </label>
 
         <h2>Payment method</h2>
-        <label style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-          <input
-            type="radio"
-            name="pm"
-            checked={method === "COD"}
-            onChange={() => setMethod("COD")}
-          />
-          <span>
-            <strong>Cash on delivery</strong>
-            <br />
-            <small className="muted">Pay in cash when your order arrives.</small>
-          </span>
-        </label>
-        <label style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-          <input
-            type="radio"
-            name="pm"
-            checked={method === "BANK_TRANSFER"}
-            onChange={() => setMethod("BANK_TRANSFER")}
-          />
-          <span>
-            <strong>Bank transfer</strong>
-            <br />
+        {!offered.length && (
+          <p role="alert" className="message">
+            No payment methods are available for {country} right now. Please{" "}
+            {settings?.whatsappNumber ? (
+              <a
+                href={`https://wa.me/${settings.whatsappNumber.replace(/\D/g, "")}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                contact us on WhatsApp
+              </a>
+            ) : (
+              "contact us"
+            )}{" "}
+            to complete your order.
+          </p>
+        )}
+        {offered.map((m) => {
+          const label = METHOD_LABEL[m.method] ?? {
+            title: m.method,
+            hint: "",
+          };
+          return (
+            <label
+              key={m.method}
+              style={{ display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 8 }}
+            >
+              <input
+                type="radio"
+                name="pm"
+                checked={method === m.method}
+                onChange={() => setMethod(m.method)}
+              />
+              <span>
+                <strong>{label.title}</strong>
+                <br />
+                <small className="muted">{label.hint}</small>
+              </span>
+            </label>
+          );
+        })}
+        {comingSoon.length > 0 && (
+          <p className="muted">
+            Coming soon:{" "}
+            {comingSoon
+              .map((m) => METHOD_LABEL[m.method]?.title ?? m.method)
+              .join(", ")}{" "}
+            —{" "}
+            {settings?.whatsappNumber ? (
+              <a
+                href={`https://wa.me/${settings.whatsappNumber.replace(/\D/g, "")}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                contact us on WhatsApp
+              </a>
+            ) : (
+              "contact us"
+            )}{" "}
+            to complete your order.
+          </p>
+        )}
+
+        {receivingDetails()}
+
+        {needsRef && (
+          <label>
+            Transaction / reference ID
+            <input
+              value={paymentRef}
+              onChange={(e) => setPaymentRef(e.target.value)}
+              required
+              maxLength={100}
+              placeholder="e.g. TID123456789"
+            />
             <small className="muted">
-              We will share bank details on WhatsApp after you order.
+              Enter the ID from your {METHOD_LABEL[method]?.title} transfer so
+              we can verify it faster.
             </small>
-          </span>
-        </label>
+          </label>
+        )}
 
         {error && (
           <p role="alert" className="message">
             {error}
           </p>
         )}
-        <button className="button dark full" disabled={busy}>
+        <button className="button dark full" disabled={busy || !offered.length}>
           {busy ? "Placing order…" : `Place order · ${money(total)}`}
         </button>
         <p className="muted">

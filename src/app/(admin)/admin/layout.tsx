@@ -15,9 +15,15 @@ export default async function AdminLayout({
         <Link className="button" href="/admin">Dashboard</Link>
         <Link className="button" href="/admin/orders">Orders</Link>
         <Link className="button" href="/admin/products">Products</Link>
+        <Link className="button" href="/admin/categories">Categories</Link>
+        <Link className="button" href="/admin/claims">Claims</Link>
+        <Link className="button" href="/admin/refunds">Refunds</Link>
+        <Link className="button" href="/admin/exchanges">Exchanges</Link>
+        <Link className="button" href="/admin/reviews">Reviews</Link>
         <Link className="button" href="/admin/inventory">Inventory</Link>
         <Link className="button" href="/admin/ledger">Ledger</Link>
         <Link className="button" href="/admin/users">Users</Link>
+        <Link className="button" href="/admin/settings">Settings</Link>
       </nav>
       {children}
     </main>

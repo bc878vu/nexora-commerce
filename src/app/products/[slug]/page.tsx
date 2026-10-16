@@ -2,9 +2,10 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { prisma } from "@/lib/db";
-import { catalog, money, presentationFor } from "@/lib/catalog";
+import { catalog, money, presentationFor, categoryPath } from "@/lib/catalog";
 import type { ApiProduct } from "@/app/api/catalog/route";
 import ProductDetailClient from "./ProductDetailClient";
+import ReviewsSection from "@/components/ReviewsSection";
 
 export const dynamic = "force-dynamic";
 
@@ -17,11 +18,17 @@ async function getProduct(slug: string): Promise<ApiProduct | null> {
       });
       if (p) {
         const pres = presentationFor(p.id);
+        const cats = await prisma.category.findMany({
+          select: { id: true, name: true, parentId: true },
+        });
         return {
           id: p.id,
           name: p.name,
           slug: p.slug,
           category: p.category,
+          categoryId: p.categoryId,
+          categoryPath: categoryPath(cats, p.categoryId).map((c) => c.name),
+          status: p.status,
           description: p.description,
           basePrice: Number(p.basePrice),
           icon: pres.icon,
@@ -47,6 +54,9 @@ async function getProduct(slug: string): Promise<ApiProduct | null> {
     name: c.name,
     slug: c.id,
     category: c.category,
+    categoryId: null,
+    categoryPath: [c.category],
+    status: "ACTIVE" as const,
     description: c.description,
     basePrice: c.price,
     icon: c.icon,
@@ -71,9 +81,21 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const p = await getProduct((await params).slug);
   if (!p) return { title: "Product not found" };
+  const title = `${p.name} — ${money(p.basePrice)}`;
   return {
-    title: `${p.name} — ${money(p.basePrice)}`,
-    description: p.description,
+    title,
+    description: p.description.slice(0, 160),
+    openGraph: {
+      type: "website",
+      title,
+      description: p.description.slice(0, 160),
+      siteName: "Nexora Commerce",
+    },
+    twitter: {
+      card: "summary",
+      title,
+      description: p.description.slice(0, 160),
+    },
   };
 }
 
@@ -84,6 +106,11 @@ export default async function ProductPage({
 }) {
   const product = await getProduct((await params).slug);
   if (!product) notFound();
+  if (product.status !== "ACTIVE") notFound();
+  const crumbs =
+    product.categoryPath.length > 1
+      ? product.categoryPath
+      : [product.category];
   const related = catalog
     .filter((c) => c.id !== product.id && c.category === product.category)
     .slice(0, 3);
@@ -91,9 +118,16 @@ export default async function ProductPage({
     <main className="dashboard">
       <p className="muted">
         <Link href="/">Home</Link> / <Link href="/#collection">Shop</Link> /{" "}
-        {product.category} / <strong>{product.name}</strong>
+        {crumbs.map((c, i) => (
+          <span key={c}>
+            {i > 0 && " / "}
+            {c}
+          </span>
+        ))}{" "}
+        / <strong>{product.name}</strong>
       </p>
       <ProductDetailClient product={product} />
+      <ReviewsSection productId={product.id} />
       {related.length > 0 && (
         <section style={{ marginTop: 60 }}>
           <h2>You may also like</h2>

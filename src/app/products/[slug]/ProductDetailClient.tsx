@@ -51,6 +51,7 @@ export default function ProductDetailClient({
 
   if (!variant) return null;
   return (
+    <>
     <section className="detail-modal" style={{ margin: "30px auto", maxWidth: 960 }}>
       <ProductArt icon={product.icon} tone={product.tone} large />
       <div className="detail-copy">
@@ -135,7 +136,7 @@ export default function ProductDetailClient({
         </div>
         <div className="benefits" style={{ marginTop: 20 }}>
           <span>
-            <Truck size={16} /> Free delivery over Rs 5,000
+            <Truck size={16} /> Free delivery over $75
           </span>
           <span>
             <RotateCcw size={16} /> 7-day easy exchange
@@ -143,5 +144,45 @@ export default function ProductDetailClient({
         </div>
       </div>
     </section>
+    {/* Sticky mobile add-to-cart bar */}
+    <div
+      className="sticky-cart"
+      style={{
+        position: "sticky",
+        bottom: 0,
+        zIndex: 20,
+        background: "var(--bg, #fff)",
+        borderTop: "1px solid var(--line, #eee)",
+        padding: "10px 16px",
+        display: "flex",
+        gap: 12,
+        alignItems: "center",
+        justifyContent: "space-between",
+      }}
+    >
+      <div>
+        <div style={{ fontWeight: 600 }}>{money(variant.price)}</div>
+        <small className="muted">
+          {variant.stock > 0 ? `${variant.stock} in stock` : "Sold out"}
+        </small>
+      </div>
+      <button
+        className="button dark"
+        disabled={variant.stock === 0}
+        onClick={add}
+        style={{ flex: 1, maxWidth: 320 }}
+      >
+        {added ? (
+          <>
+            <Check size={16} /> Added to bag
+          </>
+        ) : (
+          <>
+            Add to bag <Plus size={16} />
+          </>
+        )}
+      </button>
+    </div>
+    </>
   );
 }

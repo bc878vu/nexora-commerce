@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { isAdmin, sameOrigin, session } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { orderStatusUpdate } from "@/lib/validation";
+import { orderAdminUpdate } from "@/lib/validation";
 
 const FLOW: Record<string, string[]> = {
   PROCESSING: ["SHIPPED", "CANCELLED"],
@@ -19,10 +19,13 @@ export async function PATCH(
   if (!(await isAdmin()))
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
-  const parsed = orderStatusUpdate.safeParse(await req.json().catch(() => null));
-  if (!parsed.success)
-    return NextResponse.json({ error: "Invalid status." }, { status: 400 });
-  const next = parsed.data.status;
+  const parsed = orderAdminUpdate.safeParse(await req.json().catch(() => null));
+  if (
+    !parsed.success ||
+    (parsed.data.status === undefined && parsed.data.paymentVerified === undefined)
+  )
+    return NextResponse.json({ error: "Nothing to update." }, { status: 400 });
+  const { status: next, paymentVerified } = parsed.data;
 
   try {
     const order = await prisma.order.findUnique({
@@ -30,6 +33,16 @@ export async function PATCH(
       include: { items: true },
     });
     if (!order) return NextResponse.json({ error: "Order not found" }, { status: 404 });
+
+    // Payment verification toggle (no status change).
+    if (next === undefined) {
+      const updated = await prisma.order.update({
+        where: { id },
+        data: { paymentVerified: paymentVerified! },
+      });
+      return NextResponse.json({ ok: true, paymentVerified: updated.paymentVerified });
+    }
+
     if (!FLOW[order.status].includes(next))
       return NextResponse.json(
         { error: `Cannot move order from ${order.status} to ${next}.` },

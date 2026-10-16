@@ -18,19 +18,26 @@ type Product = {
   id: string;
   name: string;
   category: string;
+  categoryId: string | null;
+  status: "ACTIVE" | "INACTIVE" | "DRAFT";
   description: string;
   basePrice: string;
   variants: Variant[];
 };
 
+type Category = { id: string; name: string; parentId: string | null };
+
 export default function AdminProducts() {
   const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({
     name: "",
     category: "Handbags",
+    categoryId: "",
+    status: "ACTIVE",
     description: "",
     basePrice: "",
     colors: "",
@@ -43,11 +50,14 @@ export default function AdminProducts() {
   const [editPrice, setEditPrice] = useState("");
 
   function load() {
-    fetch("/api/admin/products")
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.error) throw Error(d.error);
-        setProducts(d.products);
+    Promise.all([
+      fetch("/api/admin/products").then((r) => r.json()),
+      fetch("/api/admin/categories").then((r) => r.json()).catch(() => ({ categories: [] })),
+    ])
+      .then(([p, c]) => {
+        if (p.error) throw Error(p.error);
+        setProducts(p.products);
+        setCategories(c.categories ?? []);
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
@@ -70,6 +80,8 @@ export default function AdminProducts() {
           product: {
             name: form.name,
             category: form.category,
+            categoryId: form.categoryId || null,
+            status: form.status,
             description: form.description,
             basePrice: Number(form.basePrice),
           },
@@ -88,12 +100,29 @@ export default function AdminProducts() {
       const d = await r.json();
       if (!r.ok) throw Error(d.error || "Could not create product");
       setNotice(`Created ${d.product.name}.`);
-      setForm({ name: "", category: "Handbags", description: "", basePrice: "", colors: "", specs: "", unitCost: "", stock: "" });
+      setForm({ name: "", category: "Handbags", categoryId: "", status: "ACTIVE", description: "", basePrice: "", colors: "", specs: "", unitCost: "", stock: "" });
       load();
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function toggleStatus(p: Product) {
+    const next = p.status === "ACTIVE" ? "INACTIVE" : "ACTIVE";
+    if (!confirm(`Set “${p.name}” to ${next}? ${next === "INACTIVE" ? "It will be hidden from the storefront." : "It will appear in the storefront."}`))
+      return;
+    const r = await fetch(`/api/admin/products/${p.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: next }),
+    });
+    const d = await r.json();
+    if (!r.ok) setError(d.error || "Could not update status");
+    else {
+      setNotice(`“${p.name}” is now ${next}.`);
+      load();
     }
   }
 
@@ -148,12 +177,33 @@ export default function AdminProducts() {
             <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required minLength={2} />
           </label>
           <label>
-            Category
+            Category label
             <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
               <option>Handbags</option>
               <option>Footwear</option>
               <option>Wallets</option>
               <option>Accessories</option>
+            </select>
+          </label>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <label>
+            Category (for shop navigation)
+            <select value={form.categoryId} onChange={(e) => setForm({ ...form, categoryId: e.target.value })}>
+              <option value="">None</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Status
+            <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+              <option value="ACTIVE">Active (visible in store)</option>
+              <option value="DRAFT">Draft (hidden)</option>
+              <option value="INACTIVE">Inactive (hidden)</option>
             </select>
           </label>
         </div>
@@ -163,11 +213,11 @@ export default function AdminProducts() {
         </label>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
           <label>
-            Retail price (Rs)
+            Retail price (USD)
             <input type="number" min={1} value={form.basePrice} onChange={(e) => setForm({ ...form, basePrice: e.target.value })} required />
           </label>
           <label>
-            Unit cost (Rs)
+            Unit cost (USD)
             <input type="number" min={0} value={form.unitCost} onChange={(e) => setForm({ ...form, unitCost: e.target.value })} required />
           </label>
           <label>
@@ -195,8 +245,12 @@ export default function AdminProducts() {
       {products.map((p) => (
         <article className="order-card" key={p.id}>
           <p>
-            <strong>{p.name}</strong>
+            <strong>{p.name}</strong>{" "}
+            <span className="badge">{p.status.toLowerCase()}</span>
             <span>
+              <button onClick={() => toggleStatus(p)}>
+                {p.status === "ACTIVE" ? "Deactivate" : "Activate"}
+              </button>{" "}
               <button
                 onClick={() => {
                   setEditing(p);
@@ -238,7 +292,7 @@ export default function AdminProducts() {
           {editing?.id === p.id && (
             <p style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <label>
-                New base price (Rs)
+                New base price (USD)
                 <input type="number" min={1} value={editPrice} onChange={(e) => setEditPrice(e.target.value)} />
               </label>
               <button className="button dark" disabled={busy} onClick={savePrice}>

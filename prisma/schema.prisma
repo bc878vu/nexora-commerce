@@ -27,6 +27,61 @@ enum StockChangeReason {
   ORDER_CANCELLATION
   MANUAL_AUDIT
   DAMAGED_WRITE_OFF
+  EXCHANGE_OUT
+  EXCHANGE_IN
+}
+
+enum ProductStatus {
+  ACTIVE
+  INACTIVE
+  DRAFT
+}
+
+enum PaymentMethod {
+  COD
+  BANK_TRANSFER
+  JAZZCASH
+  EASYPAYSA
+  STRIPE
+  PAYPAL
+}
+
+enum ClaimType {
+  DAMAGED
+  WRONG_ITEM
+  NOT_RECEIVED
+  QUALITY_ISSUE
+  OTHER
+}
+
+enum ClaimStatus {
+  OPEN
+  IN_REVIEW
+  APPROVED
+  REJECTED
+  RESOLVED
+}
+
+enum RefundStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  PROCESSED
+}
+
+enum RefundMethod {
+  BANK_TRANSFER
+  JAZZCASH
+  EASYPAYSA
+  STRIPE
+  PAYPAL
+}
+
+enum ExchangeStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  COMPLETED
 }
 
 model User {
@@ -37,6 +92,11 @@ model User {
   role         Role      @default(CUSTOMER)
   orders       Order[]
   addresses    Address[]
+  claims       Claim[]
+  refunds      Refund[]
+  exchanges    Exchange[]
+  reviews      Review[]
+  wishlist     WishlistItem[]
   createdAt    DateTime  @default(now())
 }
 
@@ -57,11 +117,34 @@ model Product {
   name        String
   slug        String           @unique
   category    String
+  categoryId  String?
+  categoryRef Category?        @relation(fields: [categoryId], references: [id])
+  status      ProductStatus    @default(ACTIVE)
   description String
   basePrice   Decimal          @db.Decimal(10, 2)
   variants    ProductVariant[]
+  reviews     Review[]
+  wishlist    WishlistItem[]
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
+
+  @@index([categoryId])
+  @@index([status])
+}
+
+model Category {
+  id        String     @id @default(cuid())
+  name      String
+  slug      String     @unique
+  image     String?
+  parentId  String?
+  parent    Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children  Category[] @relation("CategoryTree")
+  products  Product[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@index([parentId])
 }
 
 model ProductVariant {
@@ -78,6 +161,8 @@ model ProductVariant {
   warehouseBin   String           @default("WH-A1-01")
   ledgerEntries  StockLedger[]
   orderItems     OrderItem[]
+  exchangeFrom   Exchange[] @relation("ExchangeFrom")
+  exchangeTo     Exchange[] @relation("ExchangeTo")
   updatedAt      DateTime         @updatedAt
 
   @@index([sku])
@@ -97,16 +182,22 @@ model StockLedger {
 }
 
 model Order {
-  id              String      @id @default(cuid())
-  orderNumber     String      @unique
+  id              String        @id @default(cuid())
+  orderNumber     String        @unique
   userId          String
-  user            User        @relation(fields: [userId], references: [id])
-  status          OrderStatus @default(PROCESSING)
-  totalAmount     Decimal     @db.Decimal(10, 2)
+  user            User          @relation(fields: [userId], references: [id])
+  status          OrderStatus   @default(PROCESSING)
+  totalAmount     Decimal       @db.Decimal(10, 2)
   shippingAddress String
+  paymentMethod   PaymentMethod @default(COD)
+  paymentRef      String?
+  paymentVerified Boolean       @default(false)
   items           OrderItem[]
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
+  claims          Claim[]
+  refunds         Refund[]
+  exchanges       Exchange[]
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 }
 
 model OrderItem {
@@ -118,4 +209,144 @@ model OrderItem {
   sku       String
   quantity  Int
   unitPrice Decimal        @db.Decimal(10, 2)
+}
+
+model Claim {
+  id             String      @id @default(cuid())
+  orderId        String
+  order          Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User        @relation(fields: [userId], references: [id])
+  type           ClaimType
+  description    String
+  status         ClaimStatus @default(OPEN)
+  resolutionNote String?
+  refunds        Refund[]
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@index([orderId])
+  @@index([userId])
+  @@index([status])
+}
+
+model Refund {
+  id            String       @id @default(cuid())
+  orderId       String
+  order         Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  claimId       String?
+  claim         Claim?       @relation(fields: [claimId], references: [id])
+  userId        String
+  user          User         @relation(fields: [userId], references: [id])
+  amountInt     Int // USD cents (whole-dollar amounts x 100)
+  reason        String
+  method        RefundMethod
+  accountDetail String // customer's receiving account info (typed by customer)
+  status        RefundStatus @default(REQUESTED)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([orderId])
+  @@index([userId])
+  @@index([status])
+}
+
+model Exchange {
+  id            String         @id @default(cuid())
+  orderId       String
+  order         Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User           @relation(fields: [userId], references: [id])
+  fromVariantId String
+  fromVariant   ProductVariant @relation("ExchangeFrom", fields: [fromVariantId], references: [id])
+  toVariantId   String
+  toVariant     ProductVariant @relation("ExchangeTo", fields: [toVariantId], references: [id])
+  quantity      Int            @default(1)
+  reason        String
+  status        ExchangeStatus @default(REQUESTED)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([orderId])
+  @@index([userId])
+  @@index([status])
+}
+
+/**
+ * Singleton row (id = "default") holding the store's own receiving
+ * payment details shown at checkout, plus configurable payment methods
+ * and international shipping zones. Edited in admin Settings.
+ * No payment numbers are hard-coded anywhere in the codebase.
+ *
+ * paymentMethods JSON: [{ method: "COD"|"BANK_TRANSFER"|"JAZZCASH"|"EASYPAYSA"|"STRIPE"|"PAYPAL",
+ *                          enabled: boolean, allowedCountries: string[] }]
+ *   - empty allowedCountries = worldwide (except where noted below)
+ *   - COD is Pakistan-only by default (cash on delivery isn't offered abroad)
+ *   - STRIPE / PAYPAL are offered at checkout ONLY when enabled AND their
+ *     API keys are configured; otherwise checkout shows "coming soon".
+ *
+ * shippingZones JSON: [{ zone: string, countries: string[],
+ *                        rateCents: number, freeOverCents: number }]
+ *   - a customer's country matches the first zone whose countries list
+ *     contains it (case-insensitive); otherwise the "Rest of World" zone
+ *     (or the last zone) applies.
+ */
+model StoreSettings {
+  id                 String   @id @default("default")
+  jazzcashNumber     String   @default("")
+  easypaisaNumber    String   @default("")
+  bankName           String   @default("")
+  bankAccount        String   @default("")
+  bankIban           String   @default("")
+  stripePublishableKey String @default("")
+  stripeSecretKey      String @default("")
+  paypalClientId       String @default("")
+  paypalSecret         String @default("")
+  whatsappNumber     String   @default("")
+  announcement       String   @default("Free worldwide shipping on orders over $75")
+  paymentMethods     Json     @default("[]")
+  shippingZones      Json     @default("[]")
+  updatedAt          DateTime @updatedAt
+}
+
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/**
+ * Customer reviews. Only verified buyers may review: the user must have
+ * a DELIVERED order containing a variant of the product. One review per
+ * product per user; users may edit their own review (returns to PENDING).
+ * No seeded/fake reviews — "No reviews yet" is the honest empty state.
+ */
+model Review {
+  id        String       @id @default(cuid())
+  productId String
+  product   Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User         @relation(fields: [userId], references: [id])
+  rating    Int
+  title     String
+  comment   String
+  status    ReviewStatus @default(PENDING)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  @@unique([productId, userId])
+  @@index([productId, status])
+}
+
+/** Customer wishlist — hearted products, persisted per user. */
+model WishlistItem {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, productId])
+  @@index([userId])
 }
