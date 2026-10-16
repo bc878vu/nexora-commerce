@@ -1,0 +1,123 @@
+import { NextResponse } from "next/server";
+import { randomUUID } from "node:crypto";
+import { prisma } from "@/lib/db";
+import { session, setSession, sameOrigin } from "@/lib/auth";
+import { checkout } from "@/lib/validation";
+import { shipping } from "@/lib/catalog";
+export async function GET() {
+  const s = await session();
+  if (!s || s.role !== "CUSTOMER") return NextResponse.json({ orders: [] });
+  try {
+    return NextResponse.json({
+      orders: await prisma.order.findMany({
+        where: { userId: s.id },
+        include: { items: true },
+        orderBy: { createdAt: "desc" },
+        take: 100,
+      }),
+    });
+  } catch {
+    return NextResponse.json(
+      { error: "Could not load orders" },
+      { status: 503 },
+    );
+  }
+}
+export async function POST(req: Request) {
+  if (!sameOrigin(req))
+    return NextResponse.json({ error: "Invalid origin" }, { status: 403 });
+  if (
+    !process.env.DATABASE_URL ||
+    !process.env.SESSION_SECRET ||
+    process.env.SESSION_SECRET.length < 32
+  )
+    return NextResponse.json(
+      {
+        error:
+          "Preview mode: checkout requires database and session setup. No order has been placed.",
+      },
+      { status: 503 },
+    );
+  const parsed = checkout.safeParse(await req.json().catch(() => null));
+  if (!parsed.success)
+    return NextResponse.json(
+      { error: "Please check your contact details, address and cart." },
+      { status: 400 },
+    );
+  const body = parsed.data;
+  const s = await session();
+  const userId = s?.role === "CUSTOMER" ? s.id : randomUUID();
+  try {
+    const order = await prisma.$transaction(async (tx) => {
+      await tx.user.upsert({
+        where: { id: userId },
+        create: {
+          id: userId,
+          name: body.name,
+          email: userId + "@guest.nexora.invalid",
+        },
+        update: { name: body.name },
+      });
+      const items = [];
+      let subtotal = 0;
+      for (const item of [...body.items].sort((a, b) =>
+        a.id.localeCompare(b.id),
+      )) {
+        const v = await tx.productVariant.findUniqueOrThrow({
+          where: { id: item.id },
+        });
+        if (v.onHandStock - v.reservedStock < item.quantity)
+          throw new Error("Stock unavailable");
+        const update = await tx.productVariant.updateMany({
+          where: {
+            id: v.id,
+            onHandStock: v.onHandStock,
+            reservedStock: v.reservedStock,
+          },
+          data: { onHandStock: { decrement: item.quantity } },
+        });
+        if (update.count !== 1) throw new Error("Stock changed");
+        await tx.stockLedger.create({
+          data: {
+            variantId: v.id,
+            delta: -item.quantity,
+            balanceAfter: v.onHandStock - item.quantity,
+            reason: "CUSTOMER_CHECKOUT",
+            actorName: "Customer checkout",
+          },
+        });
+        subtotal += Math.round(Number(v.retailPrice) * 100) * item.quantity;
+        items.push({
+          variantId: v.id,
+          sku: v.sku,
+          quantity: item.quantity,
+          unitPrice: v.retailPrice,
+        });
+      }
+      const total = subtotal / 100;
+      return tx.order.create({
+        data: {
+          orderNumber: "NX-" + randomUUID().toUpperCase(),
+          userId,
+          totalAmount: total + shipping(total),
+          shippingAddress: JSON.stringify({
+            name: body.name,
+            email: body.email,
+            address: body.address,
+          }),
+          items: { create: items },
+        },
+      });
+    });
+    await setSession(userId);
+    return NextResponse.json({ order }, { status: 201 });
+  } catch {
+    return NextResponse.json(
+      {
+        error:
+          "Could not place order. Stock may have changed; refresh your cart and retry.",
+      },
+      { status: 409 },
+    );
+  }
+}
