@@ -113,6 +113,7 @@ export const catalog: CatalogProduct[] = [
     description:
       "Comfortable 2-inch block heels with a cushioned insole and ankle strap. Steady enough for all-day wear, pretty enough for dinner.",
     price: 69,
+    image: "/products/fw-zara.jpg",
     icon: "footprints",
     tone: "#f2e7dc",
     colors: ["Nude", "Black"],
@@ -126,6 +127,7 @@ export const catalog: CatalogProduct[] = [
     description:
       "Soft ballet flats with a flexible sole and bow detail. The pair you'll reach for every single morning.",
     price: 39,
+    image: "/products/fw-amara.jpg",
     icon: "footprints",
     tone: "#eee9e4",
     colors: ["Beige", "Black", "White"],
@@ -139,6 +141,7 @@ export const catalog: CatalogProduct[] = [
     description:
       "Easy wedge sandals with a braided strap and non-slip sole. Summer comfort with a little lift.",
     price: 55,
+    image: "/products/fw-lena.jpg",
     icon: "footprints",
     tone: "#e8ecdf",
     colors: ["Tan", "Black"],
@@ -152,6 +155,7 @@ export const catalog: CatalogProduct[] = [
     description:
       "Lightweight strappy flats with a soft footbed. Breathable, bendable and kind to long days.",
     price: 35,
+    image: "/products/fw-haya.jpg",
     icon: "footprints",
     tone: "#f3e3e3",
     colors: ["Brown", "Black", "Pink"],
@@ -165,6 +169,7 @@ export const catalog: CatalogProduct[] = [
     description:
       "A slim bifold wallet with 8 card slots, 2 currency compartments and an ID window. Everyday organization, beautifully simple.",
     price: 29,
+    image: "/products/wl-ivy.jpg",
     icon: "wallet",
     tone: "#ece4da",
     colors: ["Tan", "Black", "Rose"],
@@ -178,6 +183,7 @@ export const catalog: CatalogProduct[] = [
     description:
       "A minimal card holder for 6 cards plus folded notes. Slips into any bag — or any pocket.",
     price: 19,
+    image: "/products/wl-pearl.jpg",
     icon: "wallet",
     tone: "#f0ece6",
     colors: ["Ivory", "Beige", "Black"],
