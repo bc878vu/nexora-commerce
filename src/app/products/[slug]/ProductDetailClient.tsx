@@ -53,7 +53,7 @@ export default function ProductDetailClient({
   return (
     <>
     <section className="detail-modal" style={{ margin: "30px auto", maxWidth: 960 }}>
-      <ProductArt icon={product.icon} tone={product.tone} large />
+      <ProductArt icon={product.icon} tone={product.tone} large image={product.image} alt={product.name} />
       <div className="detail-copy">
         <p className="eyebrow">{product.category}</p>
         <h1 style={{ fontSize: 34 }}>{product.name}</h1>

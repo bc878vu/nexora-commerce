@@ -15,6 +15,7 @@ export type CatalogProduct = {
   price: number; // USD
   icon: "handbag" | "footprints" | "wallet";
   tone: string;
+  image?: string;
   colors: string[];
   specs: string[];
   stockPerVariant: number;
@@ -28,6 +29,7 @@ export const catalog: CatalogProduct[] = [
     description:
       "A roomy everyday tote in soft-grain faux leather with a zip-top closure, inner pocket and detachable pouch. Carries workday to weekend with ease.",
     price: 79,
+    image: "/products/hb-aurelia.jpg",
     icon: "handbag",
     tone: "#f3e9df",
     colors: ["Tan", "Black", "Cream"],
@@ -41,6 +43,7 @@ export const catalog: CatalogProduct[] = [
     description:
       "A compact crossbody with an adjustable strap and gold-tone hardware. Fits phone, wallet and keys — perfect for days on the move.",
     price: 49,
+    image: "/products/hb-mira.jpg",
     icon: "handbag",
     tone: "#f0e4e6",
     colors: ["Beige", "Black", "Blush"],
@@ -54,6 +57,7 @@ export const catalog: CatalogProduct[] = [
     description:
       "A structured shoulder bag with a flap closure and chain-accent strap. Polished enough for evenings, practical enough for every day.",
     price: 89,
+    image: "/products/hb-sofia.jpg",
     icon: "handbag",
     tone: "#e9e2d6",
     colors: ["Cognac", "Black"],
@@ -67,6 +71,7 @@ export const catalog: CatalogProduct[] = [
     description:
       "A slim evening clutch with a magnetic clasp and optional wristlet chain. Just enough room for the essentials, with a little shine.",
     price: 45,
+    image: "/products/hb-elena.jpg",
     icon: "handbag",
     tone: "#ece7f0",
     colors: ["Gold", "Silver", "Black"],
@@ -80,6 +85,7 @@ export const catalog: CatalogProduct[] = [
     description:
       "A classic satchel with top handles and a detachable shoulder strap. Multiple compartments keep everything in its place.",
     price: 65,
+    image: "/products/hb-noor.jpg",
     icon: "handbag",
     tone: "#efe4d8",
     colors: ["Brown", "Maroon"],
@@ -93,6 +99,7 @@ export const catalog: CatalogProduct[] = [
     description:
       "A petite backpack with drawstring closure and padded straps. Hands-free comfort for campus, travel and daily errands.",
     price: 59,
+    image: "/products/hb-dua.jpg",
     icon: "handbag",
     tone: "#e4e8dd",
     colors: ["Black", "Olive", "Grey"],
@@ -416,5 +423,5 @@ export function reviewEligibility(
 /** Presentation lookup for DB-backed variants. */
 export function presentationFor(productId: string) {
   const p = catalog.find((c) => c.id === productId);
-  return { icon: p?.icon ?? "handbag", tone: p?.tone ?? "#e5e7eb" };
+  return { icon: p?.icon ?? "handbag", tone: p?.tone ?? "#e5e7eb", image: p?.image };
 }

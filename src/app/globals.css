@@ -189,6 +189,15 @@ main {
   position: relative;
   min-height: 430px;
 }
+.product {
+  cursor: pointer;
+}
+.product .product-art img {
+  transition: transform 0.5s ease;
+}
+.product:hover .product-art img {
+  transform: scale(1.06);
+}
 .product-art {
   height: 270px;
   display: flex;
@@ -844,7 +853,7 @@ hr {
   }
   nav {
     gap: 15px;
-    font-size: 10px;
+    font-size: 12px;
   }
   nav a:first-child {
     display: none;
@@ -890,7 +899,7 @@ hr {
     gap: 4px;
   }
   .tabs button {
-    font-size: 10px;
+    font-size: 11px;
     padding: 8px 10px;
   }
   .bag-button {
@@ -922,7 +931,7 @@ hr {
     width: 100px;
   }
   .product-tag {
-    font-size: 6px;
+    font-size: 8px;
     top: 10px;
     left: 8px;
     padding: 5px;
@@ -934,7 +943,7 @@ hr {
     font-size: 14px;
   }
   .product-info small {
-    font-size: 8px;
+    font-size: 10px;
   }
   .product-info p {
     font-size: 11px;

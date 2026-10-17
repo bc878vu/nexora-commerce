@@ -34,6 +34,7 @@ type CardProduct = {
   category: string;
   basePrice: number;
   icon: string;
+  image?: string;
   tone: string;
 };
 
@@ -56,6 +57,7 @@ async function getProducts(cat: CatInfo): Promise<CardProduct[]> {
           basePrice: Number(p.basePrice),
           icon: pres.icon,
           tone: pres.tone,
+          image: pres.image,
         };
       });
     } catch {
@@ -73,6 +75,7 @@ async function getProducts(cat: CatInfo): Promise<CardProduct[]> {
       basePrice: c.price,
       icon: c.icon,
       tone: c.tone,
+      image: c.image,
     }));
 }
 
@@ -134,7 +137,7 @@ export default async function CategoryPage({
                 href={`/products/${p.slug}`}
                 aria-label={"View " + p.name}
               >
-                <ProductArt icon={p.icon} tone={p.tone} />
+                <ProductArt icon={p.icon} tone={p.tone} image={p.image} alt={p.name} />
                 <span className="product-tag">{p.category}</span>
               </Link>
               <div className="product-info">

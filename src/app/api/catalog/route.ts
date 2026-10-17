@@ -23,6 +23,7 @@ export type ApiProduct = {
   basePrice: number;
   icon: string;
   tone: string;
+  image?: string;
   variants: ApiVariant[];
 };
 
@@ -40,6 +41,7 @@ function demoCatalog(): ApiProduct[] {
     basePrice: p.price,
     icon: p.icon,
     tone: p.tone,
+    image: p.image,
     variants: p.colors.flatMap((color) =>
       p.specs.map((spec) => ({
         id: `${p.id}::${color}::${spec}`,
@@ -83,6 +85,7 @@ export async function GET() {
           basePrice: Number(p.basePrice),
           icon: pres.icon,
           tone: pres.tone,
+          image: pres.image,
           variants: p.variants.map((v) => ({
             id: v.id,
             sku: v.sku,

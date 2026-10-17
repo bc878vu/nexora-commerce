@@ -381,7 +381,7 @@ export default function Store() {
             </div>
           </div>
           <div className="hero-visual">
-            <ProductArt icon="handbag" tone="#f3e9df" large />
+            <ProductArt icon="handbag" tone="#f3e9df" large image="/products/hb-aurelia.jpg" alt="Aurelia Tote" />
             {featured && (
               <div className="hero-product">
                 <div>
@@ -521,7 +521,7 @@ export default function Store() {
                     onClick={() => setDetail(p)}
                     aria-label={"View " + p.name}
                   >
-                    <ProductArt icon={p.icon} tone={p.tone} />
+                    <ProductArt icon={p.icon} tone={p.tone} image={p.image} alt={p.name} />
                     <span className="product-tag">
                       {badge === "In Stock"
                         ? i === 0
@@ -686,7 +686,7 @@ export default function Store() {
                     onClick={() => setDetail(p)}
                     aria-label={"Quick view " + p.name}
                   >
-                    <ProductArt icon={p.icon} tone={p.tone} />
+                    <ProductArt icon={p.icon} tone={p.tone} image={p.image} alt={p.name} />
                     <span className="product-tag">Featured</span>
                   </button>
                   <div className="product-info">
@@ -793,7 +793,7 @@ export default function Store() {
             >
               <X />
             </button>
-            <ProductArt icon={detail.icon} tone={detail.tone} />
+            <ProductArt icon={detail.icon} tone={detail.tone} image={detail.image} alt={detail.name} />
             <div className="detail-copy">
               <p className="eyebrow">{detail.category}</p>
               <h2>{detail.name}</h2>
@@ -898,7 +898,7 @@ export default function Store() {
               <>
                 {lines.map(({ sel, qty }) => (
                   <div className="cart-line" key={sel.variant.id}>
-                    <ProductArt icon={sel.product.icon} tone={sel.product.tone} />
+                    <ProductArt icon={sel.product.icon} tone={sel.product.tone} image={sel.product.image} alt={sel.product.name} />
                     <div>
                       <strong>{sel.product.name}</strong>
                       <p>

@@ -227,7 +227,7 @@ export default function CheckoutPage() {
         <h3>Order summary ({lines.reduce((s, l) => s + l.qty, 0)} items)</h3>
         {lines.map(({ item, qty }) => (
           <div className="cart-line" key={item.v.id}>
-            <ProductArt icon={item.p.icon} tone={item.p.tone} />
+            <ProductArt icon={item.p.icon} tone={item.p.tone} image={item.p.image} alt={item.p.name} />
             <div>
               <strong>{item.p.name}</strong>
               <p>
